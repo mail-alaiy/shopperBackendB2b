@@ -1,0 +1,47 @@
+services:
+  # User Service
+  db:
+    image: postgres:13
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: userdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  user-service:
+    build: ./user-service
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    env_file:
+      - ./user-service/.env
+    volumes:
+      - ./user-service:/app
+
+  # Cart Service
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  cart-service:
+    build: ./cart-service
+    ports:
+      - "8001:8001"
+    depends_on:
+      - redis
+    env_file:
+      - ./cart-service/.env
+    volumes:
+      - ./cart-service:/app
+
+volumes:
+  pgdata:
+  redis_data: 

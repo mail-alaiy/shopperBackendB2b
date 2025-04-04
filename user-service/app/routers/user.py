@@ -14,15 +14,36 @@ def get_db():
     finally:
         db.close()
 
-def get_current_user(token: str = Header(...), db: Session = Depends(get_db)):
+from fastapi import Header, HTTPException, Depends
+from sqlalchemy.orm import Session
+from jose import JWTError
+
+def get_current_user(authorization: str = Header(...), db: Session = Depends(get_db)):
     try:
+        # Split the Authorization header into "Bearer" and the actual token
+        scheme, token = authorization.split()
+
+        # Make sure the scheme is "Bearer"
+        if scheme.lower() != "bearer":
+            raise HTTPException(status_code=401, detail="Invalid authentication scheme")
+
+        # Decode the JWT token
         payload = auth.decode_access_token(token)
+
+        # Query the user by ID
         user = db.query(models.User).filter(models.User.id == payload["id"]).first()
-        if not user: 
+
+        if not user:
             raise HTTPException(status_code=404, detail="User not found")
+
         return user
+
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
+    except ValueError:
+        # This happens if authorization header format is wrong
+        raise HTTPException(status_code=401, detail="Invalid authorization header format")
+
 
 @router.post("/signup", response_model=schemas.UserOut)
 def signup(data: schemas.UserCreate, db: Session = Depends(get_db)):
