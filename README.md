@@ -4,12 +4,14 @@ This repository contains the backend services for the ShopperB2B application, in
 
 1. **User Service**: Handles user authentication and management
 2. **Cart Service**: Manages shopping carts using Redis
+3. **Product Service**: Handles product and category related operations
 
 ## Architecture
 
 - **User Service**: FastAPI application with PostgreSQL database
 - **Cart Service**: FastAPI application with Redis for cart storage
 - Both services use JWT for authentication
+- **Product Service**: FastAPI application for all product related operations
 
 ## Getting Started
 
@@ -36,6 +38,7 @@ This repository contains the backend services for the ShopperB2B application, in
 3. Access the services:
    - User Service API: http://localhost:8000
    - Cart Service API: http://localhost:8001
+   - Product Service API: http://localhost:8002 
    - PostgreSQL: localhost:5432
    - Redis: localhost:6379
 
@@ -76,6 +79,7 @@ Once the services are running, you can access the API documentation at:
 
 - User Service: http://localhost:8000/docs
 - Cart Service: http://localhost:8001/docs
+- Product Service: http://localhost:8002/docs
 
 ## Service Endpoints
 
@@ -95,6 +99,13 @@ Once the services are running, you can access the API documentation at:
 - `PUT /cart/items/{product_id}`: Update item quantity
 - `DELETE /cart/items/{product_id}`: Remove item from cart
 - `DELETE /cart`: Clear cart
+
+### Product Service
+
+- `GET /products?query={query}&limit={limit}&page={page}`: Get all matching products for the query
+- `GET /product/{product_id}`: Get the required product
+- `GET /categories`: Gets all Amazon categories
+- `GET /category/{category_id}`: Gets the category name, queries it in algolia and gets the results
 
 ## Development
 
