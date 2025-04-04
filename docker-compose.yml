@@ -42,6 +42,13 @@ services:
     volumes:
       - ./cart-service:/app
 
+  product-service:
+    build: ./product-service
+    ports: 
+      - "8002:8002"
+    env_file:
+      - ./product-service/.env
+
 volumes:
   pgdata:
   redis_data: 
