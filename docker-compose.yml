@@ -48,6 +48,13 @@ services:
       - "8002:8002"
     env_file:
       - ./product-service/.env
+  
+  order-service:
+    build: ./order-service
+    ports:
+      - "8003:8003"
+    env_file:
+      - ./order-service/.env
 
 volumes:
   pgdata:

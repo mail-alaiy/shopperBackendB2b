@@ -58,4 +58,28 @@ def get_product(product_id: str):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+@router.get("/multiple-products")
+def get_multiple_products(product_ids: list[str] = Query(...)):
+    try:
+        valid_ids = [ObjectId(pid) for pid in product_ids if ObjectId.is_valid(pid)]
+
+        if not valid_ids:
+            raise HTTPException(status_code=400, detail="No valid product IDs provided")
+
+        collection = db["products"]
+        documents = collection.find({"_id": {"$in": valid_ids}})
+        docs_list = list(documents)
+
+        if not docs_list:
+            raise HTTPException(status_code=404, detail="No products found")
+
+        serialized_docs = json.loads(json_util.dumps(docs_list))
+
+        return {
+            "message": "Successfully retrieved products",
+            "payload": serialized_docs
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
