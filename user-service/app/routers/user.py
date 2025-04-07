@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas, auth
 from app.database import SessionLocal
 from jose import JWTError
-from typing import Optional
+from typing import Optional, List
 
 router = APIRouter(prefix="/users")
 
@@ -87,6 +87,7 @@ def login(data: schemas.UserLogin, db: Session = Depends(get_db)):
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
+        "user": user,
         "token_type": "bearer"
     }
 
@@ -140,3 +141,9 @@ def update_password(
     current_user.password_hash = auth.hash_password(pw.new_password)
     db.commit()
     return {"msg": "Password updated successfully"}
+
+@router.get("/all", response_model=List[schemas.UserOut])
+def get_all_users(db: Session = Depends(get_db)):
+    
+    users = db.query(models.User).all()
+    return users
