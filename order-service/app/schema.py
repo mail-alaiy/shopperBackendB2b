@@ -5,8 +5,8 @@ class CreateOrderRequest(BaseModel):
     currency: str
     shippingPhoneNumber: str
     shippingAddress1: str
-    shippingAddress2: str
-    shippingAddress3: str
+    shippingAddress2: Optional[str] = None
+    shippingAddress3: Optional[str] = None
     recipientName: str
     shippingCity: str
     shippingState: str

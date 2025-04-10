@@ -25,10 +25,10 @@ class OrderShipping(EmbeddedDocument):
     
 class Order(Document):
     currency = StringField(required=True, max_length=10)
-    shippingPhoneNumber = StringField(required=True, unique=True, max_length=13)
+    shippingPhoneNumber = StringField(required=True, max_length=13)
     shippingAddress1 = StringField(required=True, max_length=70)
-    shippingAddress2 = StringField(required=True, max_length=70)
-    shippingAddress3 = StringField(required=True, max_length=70)
+    shippingAddress2 = StringField(required=False, max_length=70, default=None)
+    shippingAddress3 = StringField(required=False, max_length=70, default=None)
     pStatus = StringField(required=True, max_length=5)
     paidDate = DateTimeField(required=False, default=None)
     shipDate = DateTimeField(required=False, default=None)
