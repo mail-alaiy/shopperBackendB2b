@@ -89,8 +89,12 @@ async def create_order(
             raise HTTPException(status_code=400, detail="Cart is empty")
 
         product_ids = list(cart_items.keys())
+        print(f"🛒 Product IDs: {product_ids}")
         # Step 2: Fetch product details
-        products_response = requests.get(f"{PRODUCT_URL}/multiple-products", params=[("product_ids", pid) for pid in product_ids])
+        products_response = requests.post(
+            f"{PRODUCT_URL}/multiple-products", 
+            json={"product_ids": product_ids}
+        )
         print(f"📦 Product response status: {products_response.status_code}")
 
         if products_response.status_code != 200:
