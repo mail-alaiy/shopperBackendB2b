@@ -63,11 +63,8 @@ def get_product(product_id: str):
 @router.get("/products/recommend/{product_id}")
 def recommend_products(product_id: str = Path(...), max_recommendations: int = Query(10)):
     try:
-        # Validate MongoDB ObjectId
         if not ObjectId.is_valid(product_id):
             raise HTTPException(status_code=400, detail="Invalid product ID")
-
-        # Fetch product from MongoDB
         collection = db["products"]
         object_id = ObjectId(product_id)
         document = collection.find_one({"_id": object_id})
@@ -87,9 +84,10 @@ def recommend_products(product_id: str = Path(...), max_recommendations: int = Q
             "requests": [
                 {
                     "indexName": INDEX_NAME,
-                    "objectID": algolia_object_id,
+                    "objectID": product_id,
                     "model": "related-products",
-                    "maxRecommendations": max_recommendations
+                    "maxRecommendations": max_recommendations,
+                    "threshold": 42.1
                 }
             ]
         }
