@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Query, Path
 import os
 from dotenv import load_dotenv
 from app.database import db
@@ -23,9 +23,10 @@ def get_products(query: str = Query(""),limit: int = Query(10), page: int = Quer
         "X-Algolia-Application-Id": ALGOLIA_APP_ID,
         "Content-Type": "application/json"
     }
+    search_query = f"optionalWords:{query}" if query else ""
     
     payload = {
-        "params": f"query={query}&hitsPerPage={limit}&page={page}"
+        "params": f"query={query}&hitsPerPage={limit}&page={page}&optionalWords={query}"
     }
     
     response = requests.post(url, headers=headers, json=payload)
@@ -61,6 +62,57 @@ def get_product(product_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/products/recommend/{product_id}")
+def recommend_products(product_id: str = Path(...), max_recommendations: int = Query(10)):
+    try:
+        # Validate MongoDB ObjectId
+        if not ObjectId.is_valid(product_id):
+            raise HTTPException(status_code=400, detail="Invalid product ID")
+
+        # Fetch product from MongoDB
+        collection = db["products"]
+        object_id = ObjectId(product_id)
+        document = collection.find_one({"_id": object_id})
+
+        if not document:
+            raise HTTPException(status_code=404, detail="Product not found")
+        algolia_object_id = str(document["_id"])
+
+        url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/*/recommendations"
+        headers = {
+            "X-Algolia-API-Key": ALGOLIA_API_KEY,
+            "X-Algolia-Application-Id": ALGOLIA_APP_ID,
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "requests": [
+                {
+                    "indexName": INDEX_NAME,
+                    "objectID": algolia_object_id,
+                    "model": "related-products",
+                    "maxRecommendations": max_recommendations
+                }
+            ]
+        }
+
+        response = requests.post(url, headers=headers, json=payload)
+        data = response.json()
+
+        if "results" not in data or not data["results"]:
+            return {"message": "No related products found", "payload": []}
+
+        recommendations = data["results"][0].get("hits", [])
+
+        return {
+            "message": "Related products retrieved successfully",
+            "payload": recommendations
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
+        
 # Define request model
 class ProductIdsRequest(BaseModel):
     product_ids: List[str]
