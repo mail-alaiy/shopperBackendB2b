@@ -89,10 +89,11 @@ async def create_order(
             raise HTTPException(status_code=400, detail="Cart is empty")
 
         product_ids = list(cart_items.keys())
-        print(f"🛒 Product IDs: {product_ids}")
+        print(f"🛒 Product IDs in Cart: {product_ids}")
+
         # Step 2: Fetch product details
         products_response = requests.post(
-            f"{PRODUCT_URL}/multiple-products", 
+            f"{PRODUCT_URL}/multiple-products",
             json={"product_ids": product_ids}
         )
         print(f"📦 Product response status: {products_response.status_code}")
@@ -101,15 +102,14 @@ async def create_order(
             raise HTTPException(status_code=products_response.status_code, detail="Failed to fetch product details")
 
         products_json = products_response.json()
-
         products = products_json.get("payload", [])
         if not products:
             raise HTTPException(status_code=404, detail="No product details found")
 
         # Step 3: Prepare OrderDetails list using MongoEngine
+        total_price = 0
         order_details_list = []
         for prod in products:
-
             prod_id = prod.get("_id")
             if isinstance(prod_id, dict):
                 prod_id = prod_id.get("$oid", "")
@@ -122,22 +122,26 @@ async def create_order(
             print(f"🆔 Resolved Product ID: {prod_id}")
 
             sku_value = prod.get("skus", [])
-            sku_retreived = str(sku_value[0]) if isinstance(sku_value, list) and sku_value else ""
+            sku_retrieved = str(sku_value[0]) if isinstance(sku_value, list) and sku_value else ""
 
-            quantity = max(1, int(cart_items.get(prod_id, "1")))
-            print(f"📦 SKU: {sku_retreived} | Quantity: {quantity}")
-
+            cart_item = cart_items.get(prod_id, {})
+            quantity = max(1, int(cart_item.get("quantity", 1)))
+            source = cart_item.get("source")
+            print(f"📦 SKU: {sku_retrieved} | Quantity: {quantity}")
+            sp = prod.get("sp", 0)
+            total_price += quantity*sp
             order_details = OrderDetails(
-                sku=sku_retreived,
-                sellerSku=sku_retreived,
+                sku=sku_retrieved,
+                sellerSku=sku_retrieved,
                 quantity=quantity,
                 quantityShipped=quantity,
-                consumerPrice=prod.get("sp", 0),
-                title=prod.get("name", "")
+                consumerPrice=sp,
+                title=prod.get("name", ""),
+                source = source
             )
             order_details_list.append(order_details)
 
-        # Step 4: Create and save Order using MongoEngine
+        # Step 4: Create and save Order
         order = Order(
             currency=order_data.currency,
             shippingPhoneNumber=order_data.shippingPhoneNumber,
@@ -156,7 +160,8 @@ async def create_order(
             shippingCity=order_data.shippingCity,
             shippingState=order_data.shippingState,
             shippingPostalCode=order_data.shippingPostalCode,
-            shippingCountry=order_data.shippingCountry
+            shippingCountry=order_data.shippingCountry,
+            total_amount = total_price
         )
 
         order.save()

@@ -9,6 +9,7 @@ class OrderDetails(EmbeddedDocument):
     quantityShipped = IntField(min_value=1, required=False, default=1)
     consumerPrice = IntField(min_value=0, required=False, default=0)
     title = StringField(required=True, max_length = 500)
+    source = StringField(required=True, max_length=100)
     
 class OrderShipping(EmbeddedDocument):
     sm_title = StringField(required=True, max_length = 50)
@@ -42,6 +43,7 @@ class Order(Document):
     shippingPostalCode = StringField(required=True, max_length=20)
     shippingCountry = StringField(required=True, max_length=20)
     order_shipping = ListField(EmbeddedDocumentField(OrderShipping), required=False)
+    total_amount = IntField(required=True)
     createdAt = DateTimeField(default=datetime.utcnow)
     updatedAt = DateTimeField(required=False, default=None)
     
