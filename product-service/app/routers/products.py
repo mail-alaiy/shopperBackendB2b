@@ -5,6 +5,8 @@ from app.database import db
 import requests
 import json
 from bson import ObjectId, json_util
+from pydantic import BaseModel
+from typing import List
 
 load_dotenv()
 ALGOLIA_APP_ID = os.getenv("ALGOLIA_ID")
@@ -109,10 +111,15 @@ def recommend_products(product_id: str = Path(...), max_recommendations: int = Q
         raise HTTPException(status_code=500, detail=str(e))
         
         
-@router.get("/multiple-products")
-def get_multiple_products(product_ids: list[str] = Query(...)):
+# Define request model
+class ProductIdsRequest(BaseModel):
+    product_ids: List[str]
+
+# Modified endpoint - changed to POST with request body
+@router.post("/multiple-products")
+def get_multiple_products(request: ProductIdsRequest):
     try:
-        valid_ids = [ObjectId(pid) for pid in product_ids if ObjectId.is_valid(pid)]
+        valid_ids = [ObjectId(pid) for pid in request.product_ids if ObjectId.is_valid(pid)]
 
         if not valid_ids:
             raise HTTPException(status_code=400, detail="No valid product IDs provided")

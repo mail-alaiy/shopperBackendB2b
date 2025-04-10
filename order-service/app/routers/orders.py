@@ -21,6 +21,7 @@ PRODUCT_URL = os.getenv("PRODUCT_URL")
 async def get_orders(user_id: str = Depends(get_current_user)):
     try:
         # MongoEngine query using the Order model
+        print(f"👤 User ID: {user_id}")
         orders = Order.objects(merchantId=user_id)
 
         if not orders:

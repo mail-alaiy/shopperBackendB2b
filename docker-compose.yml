@@ -11,17 +11,24 @@ services:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   user-service:
     build: ./user-service
     ports:
       - "8000:8000"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     env_file:
       - ./user-service/.env
     volumes:
       - ./user-service:/app
+    restart: always
 
   # Cart Service
   redis:
@@ -30,17 +37,24 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   cart-service:
     build: ./cart-service
     ports:
       - "8001:8001"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     env_file:
       - ./cart-service/.env
     volumes:
       - ./cart-service:/app
+    restart: always
 
   product-service:
     build: ./product-service
@@ -48,13 +62,15 @@ services:
       - "8002:8002"
     env_file:
       - ./product-service/.env
+    restart: always
   
   order-service:
     build: ./order-service
     ports:
-      - "8003:8003"
+      - "8004:8003"
     env_file:
       - ./order-service/.env
+    restart: always
 
 volumes:
   pgdata:
