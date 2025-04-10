@@ -51,9 +51,8 @@ def get_products(category_id: str, limit: int = Query(10), page: int = Query(1))
             "X-Algolia-Application-Id": ALGOLIA_APP_ID,
             "Content-Type": "application/json"
         }
-
         payload = {
-            "params": f"query={category_query}&hitsPerPage={limit}&page={page - 1}"
+            "params": f"query={category_query}&hitsPerPage={limit}&page={page}&optionalWords={category_query}"
         }
 
         response = requests.post(url, headers=headers, json=payload)
