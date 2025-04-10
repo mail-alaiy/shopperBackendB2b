@@ -67,7 +67,7 @@ services:
   order-service:
     build: ./order-service
     ports:
-      - "8004:8003"
+      - "8003:8003"
     env_file:
       - ./order-service/.env
     restart: always
