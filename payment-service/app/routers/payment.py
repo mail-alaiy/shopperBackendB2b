@@ -6,7 +6,7 @@ import json
 
 router = APIRouter()
 
-@router.post("/pay/{order_id}")
+@router.get("/pay/{order_id}")
 async def initiate_payment_for_order(
     order_id: str,
     user_id: str = Depends(get_current_user),
@@ -71,7 +71,7 @@ async def initiate_payment_for_order(
 
         data = phonepe_response.json()
         if data.get("success") and data.get("data", {}).get("instrumentResponse", {}).get("redirectInfo", {}).get("url"):
-            return data["data"]["instrumentResponse"]["redirectInfo"]["url"]
+            return {"paymentUrl": data["data"]["instrumentResponse"]["redirectInfo"]["url"]}
         else:
             print(f"Unexpected PhonePe response structure: {data}")
             raise HTTPException(status_code=502, detail="Bad response from payment gateway.")

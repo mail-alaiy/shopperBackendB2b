@@ -148,7 +148,7 @@ async def create_order(
             shippingAddress1=order_data.shippingAddress1,
             shippingAddress2=order_data.shippingAddress2,
             shippingAddress3=order_data.shippingAddress3,
-            pStatus="UP",
+            pStatus="PU",
             source=order_data.source,
             shipDate=None,
             shippingMethod="Bluedart brands 500 g Surface",
