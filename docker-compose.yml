@@ -72,6 +72,17 @@ services:
       - ./order-service/.env
     restart: always
 
+  # Payment Service
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./payment-service:/app
+    restart: always
+    env_file:
+      - ./payment-service/.env
+
 volumes:
   pgdata:
   redis_data: 
