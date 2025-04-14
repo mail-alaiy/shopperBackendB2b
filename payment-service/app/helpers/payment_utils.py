@@ -4,7 +4,7 @@ import uuid
 import json
 import requests
 import os
-from .. import constants # Use relative import for constants
+import app.constants as constants # Use relative import for constants
 from fastapi import HTTPException
 
 # Load Order Service URL once from environment
