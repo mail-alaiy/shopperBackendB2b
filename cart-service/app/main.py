@@ -16,6 +16,6 @@ app.add_middleware(
 # Include routers
 app.include_router(cart.router)
 
-@app.get("/")
+@app.get("/health-check")
 def read_root():
     return {"message": "Cart Service is running"} 

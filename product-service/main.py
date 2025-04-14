@@ -17,6 +17,6 @@ app.add_middleware(
 app.include_router(products.router)
 app.include_router(categories.router)
 
-@app.get("/")
+@app.get("/health-check")
 def read_root():
     return {"message": "Product Service is running"}

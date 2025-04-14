@@ -1,23 +1,33 @@
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Depends, Header, Request
 from typing import Dict, Optional, List
 import redis
 import json
-from app.auth import get_current_user
+from dotenv import load_dotenv
 from app.schemas import CartResponse, CartItemDetails, ProductSource, AddCartItemRequest
 from pydantic import BaseModel
+import os
 
-router = APIRouter(prefix="/cart")
+load_dotenv()
+router = APIRouter()
 
 # Redis connection
-redis_client = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
+
+REDIS_HOST = os.getenv("REDIS_HOST")
+print(REDIS_HOST)
+redis_client = redis.Redis(host="redis-62ad01f163fa3b2a.elb.ap-southeast-2.amazonaws.com", port=6379, db=0, decode_responses=True)
 
 def get_cart_key(user_id: str) -> str:
     return f"cart:{user_id}"
 
-@router.get("", response_model=CartResponse)
-async def get_cart(user_id: str = Depends(get_current_user)):
+@router.get("/debug")
+async def debug_headers(request: Request):
+    print(dict(request.headers))
+    return dict(request.headers)
+
+@router.get("/", response_model=CartResponse)
+async def get_cart(x_user_id: str = Header(...)):
     """Get the contents of a user's cart"""
-    cart_key = get_cart_key(user_id)
+    cart_key = get_cart_key(x_user_id)
     cart_data_raw = redis_client.hgetall(cart_key)
     
     cart_items = {}
@@ -38,10 +48,11 @@ async def get_cart(user_id: str = Depends(get_current_user)):
 async def add_to_cart(
     product_id: str,
     item_data: AddCartItemRequest,
-    user_id: str = Depends(get_current_user)
+    x_user_id: str = Header(...)
 ):
     """Add an item to the cart or update its quantity if source matches."""
-    cart_key = get_cart_key(user_id)
+    cart_key = get_cart_key(x_user_id)
+    print(REDIS_HOST)
     
     # Check if item already exists
     existing_item_json = redis_client.hget(cart_key, product_id)
@@ -79,10 +90,10 @@ class CartItemUpdateRequest(BaseModel):
 async def update_cart_item(
     product_id: str,
     update_data: CartItemUpdateRequest,
-    user_id: str = Depends(get_current_user)
+    x_user_id: str = Header(...)
 ):
     """Partially update an item in the cart (quantity and/or source)."""
-    cart_key = get_cart_key(user_id)
+    cart_key = get_cart_key(x_user_id)
     existing_item_json = redis_client.hget(cart_key, product_id)
 
     if not existing_item_json:
@@ -128,17 +139,17 @@ async def update_cart_item(
 @router.delete("/items/{product_id}")
 async def remove_from_cart(
     product_id: str,
-    user_id: str = Depends(get_current_user)
+    x_user_id: str = Header(...)
 ):
     """Remove an item from the cart"""
-    cart_key = get_cart_key(user_id)
+    cart_key = get_cart_key(x_user_id)
     if redis_client.hdel(cart_key, product_id):
         return {"message": "Item removed from cart"}
     raise HTTPException(status_code=404, detail="Item not found in cart")
 
-@router.delete("")
-async def clear_cart(user_id: str = Depends(get_current_user)):
+@router.delete("/")
+async def clear_cart(x_user_id: str = Header(...)):
     """Clear all items from the cart"""
-    cart_key = get_cart_key(user_id)
+    cart_key = get_cart_key(x_user_id)
     redis_client.delete(cart_key)
     return {"message": "Cart cleared"} 

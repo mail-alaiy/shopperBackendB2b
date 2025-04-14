@@ -34,7 +34,6 @@ def get_categories():
 @router.get("/category/{category_id}")
 def get_products(category_id: str, limit: int = Query(10), page: int = Query(1)):
     try:
-        # Step 1: Get category name from MongoDB
         collection = db["amazonCategories"]
         object_id = ObjectId(category_id)
         doc = collection.find_one({"_id": object_id})
@@ -43,8 +42,6 @@ def get_products(category_id: str, limit: int = Query(10), page: int = Query(1))
             return {"message": "Category not found", "payload": []}
 
         category_query = doc["category"]
-
-        # Step 2: Algolia API request
         url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{INDEX_NAME}/query"
         headers = {
             "X-Algolia-API-Key": ALGOLIA_API_KEY,

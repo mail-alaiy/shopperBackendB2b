@@ -15,7 +15,7 @@ INDEX_NAME = "product_index"
 
 router = APIRouter()
 
-@router.get("/products")
+@router.get("/")
 def get_products(query: str = Query(""),limit: int = Query(10), page: int = Query(1)):
     url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{INDEX_NAME}/query"
     headers = {
@@ -50,8 +50,6 @@ def get_product(product_id: str):
 
         if not document:
             raise HTTPException(status_code=404, detail="Product not found")
-
-        # Safely serialize with json_util
         serialized_doc = json.loads(json_util.dumps(document))
 
         return {
@@ -62,7 +60,7 @@ def get_product(product_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/products/recommend/{product_id}")
+@router.get("/recommend/{product_id}")
 def recommend_products(product_id: str = Path(...), max_recommendations: int = Query(10)):
     try:
         if not ObjectId.is_valid(product_id):
@@ -110,12 +108,9 @@ def recommend_products(product_id: str = Path(...), max_recommendations: int = Q
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
         
-        
-# Define request model
 class ProductIdsRequest(BaseModel):
     product_ids: List[str]
-
-# Modified endpoint - changed to POST with request body
+    
 @router.post("/multiple-products")
 def get_multiple_products(request: ProductIdsRequest):
     try:

@@ -1,13 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Path
+from fastapi import APIRouter, Depends, HTTPException, Header, Path, Body
+from mongoengine.errors import ValidationError as MongoValidationError
 from bson import json_util
 import json
-from app.auth import get_current_user
 from bson.objectid import ObjectId
-from bson import json_util
-import json
 import requests
 import app.database
-from app.auth import get_current_user
 from app.models import Order, OrderDetails
 from datetime import datetime
 import os
@@ -17,12 +14,11 @@ router = APIRouter()
 CART_URL = os.getenv("CART_URL")
 PRODUCT_URL = os.getenv("PRODUCT_URL")
 
-@router.get("/orders")
-async def get_orders(user_id: str = Depends(get_current_user)):
+@router.get("/")
+async def get_orders(x_user_id: str = Header(...)):
     try:
         # MongoEngine query using the Order model
-        print(f"👤 User ID: {user_id}")
-        orders = Order.objects(merchantId=user_id)
+        orders = Order.objects(merchantId=x_user_id)
 
         if not orders:
             return {"message": "No orders found", "payload": []}
@@ -38,65 +34,48 @@ async def get_orders(user_id: str = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    
 
-@router.get("/orders/{order_id}")
-async def get_order_by_id(order_id: str, user_id: str = Depends(get_current_user)):
+@router.delete("/")
+async def delete_orders(x_user_id: str = Header(...)):
     try:
-        if not ObjectId.is_valid(order_id):
-            raise HTTPException(status_code=400, detail="Invalid order ID")
-
-        # Use MongoEngine's Order model to fetch the order
-        order = Order.objects(id=ObjectId(order_id), merchantId=user_id).first()
-
-        if not order:
-            return {"message": "Order not found or not authorized", "payload": {}}
-
-        serialized_order = json.loads(json_util.dumps(order.to_mongo()))
-
+        deleted_count = Order.objects(merchantId=x_user_id).delete()
+        
+        if deleted_count == 0:
+            return {"message": "No orders found to delete", "deleted_count": 0}
+        
         return {
-            "message": "Successfully retrieved order",
-            "payload": serialized_order
+            "message": "Successfully deleted orders",
+            "deleted_count": deleted_count
         }
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/order")
+        raise HTTPException(status_code=500, detail=f"Failed to delete orders: {str(e)}")
+    
+@router.post("/")
 async def create_order(
     order_data: CreateOrderRequest,
-    user_id: str = Depends(get_current_user),
+    x_user_id: str = Header(...),
     authorization: str = Header(None)
 ):
     try:
         headers = {"Authorization": authorization}
-        print(f"\n🔐 Authorization: {authorization}")
-        print(f"👤 User ID: {user_id}")
-        print(f"📦 Calling Cart Service: {CART_URL}/cart")
-
-        # Step 1: Get Cart Items
-        cart_response = requests.get(f"{CART_URL}/cart", headers=headers)
-        print(f"🛒 Cart response status: {cart_response.status_code}")
+        cart_response = requests.get(f"{CART_URL}/", headers=headers)
 
         if cart_response.status_code != 200:
             raise HTTPException(status_code=cart_response.status_code, detail="Failed to fetch cart")
 
         cart_json = cart_response.json()
-        print(f"🛒 Cart JSON: {cart_json}")
 
         cart_items = cart_json.get("items", {})
         if not cart_items:
             raise HTTPException(status_code=400, detail="Cart is empty")
 
         product_ids = list(cart_items.keys())
-        print(f"🛒 Product IDs in Cart: {product_ids}")
 
         # Step 2: Fetch product details
         products_response = requests.post(
             f"{PRODUCT_URL}/multiple-products",
             json={"product_ids": product_ids}
         )
-        print(f"📦 Product response status: {products_response.status_code}")
 
         if products_response.status_code != 200:
             raise HTTPException(status_code=products_response.status_code, detail="Failed to fetch product details")
@@ -116,10 +95,7 @@ async def create_order(
             elif isinstance(prod_id, str):
                 prod_id = prod_id
             else:
-                print(f"⚠️ Unexpected _id format: {prod_id}")
                 continue
-
-            print(f"🆔 Resolved Product ID: {prod_id}")
 
             sku_value = prod.get("skus", [])
             sku_retrieved = str(sku_value[0]) if isinstance(sku_value, list) and sku_value else ""
@@ -127,7 +103,6 @@ async def create_order(
             cart_item = cart_items.get(prod_id, {})
             quantity = max(1, int(cart_item.get("quantity", 1)))
             source = cart_item.get("source")
-            print(f"📦 SKU: {sku_retrieved} | Quantity: {quantity}")
             sp = prod.get("sp", 0)
             total_price += quantity*sp
             order_details = OrderDetails(
@@ -140,8 +115,8 @@ async def create_order(
                 source = source
             )
             order_details_list.append(order_details)
+            
 
-        # Step 4: Create and save Order
         order = Order(
             currency=order_data.currency,
             shippingPhoneNumber=order_data.shippingPhoneNumber,
@@ -152,7 +127,7 @@ async def create_order(
             source=order_data.source,
             shipDate=None,
             shippingMethod="Bluedart brands 500 g Surface",
-            merchantId=user_id,
+            merchantId=x_user_id,
             mkpOrderId=f"ORD-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
             orderDetails=order_details_list,
             recipientName=order_data.recipientName,
@@ -164,34 +139,73 @@ async def create_order(
         )
 
         order.save()
-
-        print(f"\n✅ Order saved successfully for user: {user_id}")
         return {
             "message": "Order created successfully",
             "payload": json.loads(json_util.dumps(order.to_mongo()))
         }
 
     except Exception as e:
-        print(f"❌ Error occurred: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/orders/{order_id}")
-async def delete_order_by_id(
-    order_id: str,
-    user_id: str = Depends(get_current_user)
-):
+@router.get("/order/{order_id}")
+async def get_order_by_id(order_id: str, x_user_id: str = Header(...)):
+    try:
+        if not ObjectId.is_valid(order_id):
+            raise HTTPException(status_code=400, detail="Invalid order ID")
+        order = Order.objects(id=ObjectId(order_id), merchantId=x_user_id).first()
+
+        if not order:
+            return {"message": "Order not found or not authorized", "payload": {}}
+
+        serialized_order = json.loads(json_util.dumps(order.to_mongo()))
+
+        return {
+            "message": "Successfully retrieved order",
+            "payload": serialized_order
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.patch("/order/{order_id}")
+async def update_order_by_id(order_id: str, update_data: dict = Body(...), x_user_id: str = Header(...)):
+    try:
+        if not ObjectId.is_valid(order_id):
+            raise HTTPException(status_code=400, detail="Invalid order ID")
+        order = Order.objects(id=order_id, merchantId=x_user_id).first()
+
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found or not authorized")
+        for key, value in update_data.items():
+            if hasattr(order, key):
+                setattr(order, key, value)
+
+        order.save()
+
+        return {
+            "message": "Order successfully updated",
+            "order_id": order_id,
+            "updated_fields": update_data
+        }
+
+    except MongoValidationError as e:
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.delete("/order/{order_id}")
+async def delete_order_by_id(order_id: str, x_user_id: str = Header(...)):
     try:
         if not ObjectId.is_valid(order_id):
             raise HTTPException(status_code=400, detail="Invalid order ID")
 
-        # Use MongoEngine to find the order
-        order = Order.objects(id=order_id, merchantId=user_id).first()
+        order = Order.objects(id=order_id, merchantId=x_user_id).first()
 
         if not order:
             raise HTTPException(status_code=404, detail="Order not found or not authorized")
 
-        # Delete the order
         order.delete()
 
         return {
@@ -205,27 +219,21 @@ async def delete_order_by_id(
 @router.put("/payment-status/{order_id}")
 async def update_payment_status(
     order_id: str = Path(..., description="MongoDB Order ID to mark as paid"),
-    user_id: str = Depends(get_current_user),
+    x_user_id: str = Header(...),
     authorization: str = Header(None)
 ):
     try:
         if not ObjectId.is_valid(order_id):
             raise HTTPException(status_code=400, detail="Invalid order ID format")
 
-        print(f"\n🔐 Authorization: {authorization}")
-        print(f"👤 User ID: {user_id}")
-        print(f"💰 Updating payment status for Order ID: {order_id}")
-
-        order = Order.objects(id=order_id, merchantId=user_id).first()
+        order = Order.objects(id=order_id, merchantId=x_user_id).first()
 
         if not order:
             raise HTTPException(status_code=404, detail="Order not found or not owned by the user")
 
-        order.pStatus = "PD"  # Paid
+        order.pStatus = "PD"
         order.paidDate = datetime.utcnow()
         order.save()
-
-        print(f"✅ Payment status updated to PD for Order ID: {order_id}")
 
         return {
             "message": "Payment status updated successfully",
@@ -233,5 +241,4 @@ async def update_payment_status(
         }
 
     except Exception as e:
-        print(f"❌ Error updating payment status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
