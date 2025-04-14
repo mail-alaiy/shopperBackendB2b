@@ -93,7 +93,7 @@ def checkStatus(merchantTransactionID: str):
 
 def fetch_order_details(order_id: str, authorization: str):
     """Fetches order details from the order service."""
-    order_service_url = f"{ORDER_SERVICE_URL}/orders/{order_id}"
+    order_service_url = f"{ORDER_SERVICE_URL}/order/{order_id}"
     headers = {"Authorization": authorization}
     print(f"Fetching order details from: {order_service_url}")
     
@@ -124,7 +124,7 @@ def fetch_order_details(order_id: str, authorization: str):
 
 def fetch_user_details(authorization: str):
     """Fetches user details from the user service."""
-    user_service_url = f"{USER_SERVICE_URL}/users/me"
+    user_service_url = f"{USER_SERVICE_URL}/me"
     headers = {"Authorization": authorization}
     print(f"Fetching user details from: {user_service_url}")
     

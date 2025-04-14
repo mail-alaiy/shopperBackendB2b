@@ -20,8 +20,8 @@ app.add_middleware(
 )
 
 # Include the payment router
-app.include_router(payment.router, prefix="/payment", tags=["Payment"]) # Added prefix and tag
+app.include_router(payment.router, tags=["Payment"]) # Added and tag
 
-@app.get("/")
+@app.get("/health-check")
 async def root():
     return {"message": "Payment Service is running"}
