@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+requests
+pydantic
+python-dotenv # Optional: if you plan to use .env file for constants
+python-jose[cryptography] # For JWT authentication 
