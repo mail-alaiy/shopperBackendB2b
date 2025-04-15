@@ -12,6 +12,3 @@ connect(
     host=db_uri,
     tlsCAFile=certifi.where()
 )
-
-#shipping address 3
-#add - company name
