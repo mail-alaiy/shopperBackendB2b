@@ -130,6 +130,6 @@ def update_password(
 
 # Get all users
 @router.get("/all", response_model=List[schemas.UserOut])
-def get_all_users(db: Session = Depends(get_db), user: models.User = Depends(get_user_by_header)):
-    users = db.query(models.User).all()
+def get_all_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    users = db.query(models.User).offset(skip).limit(limit).all()
     return users

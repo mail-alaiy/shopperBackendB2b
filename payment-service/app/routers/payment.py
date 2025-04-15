@@ -134,9 +134,10 @@ async def phonepe_webhook(request: Request):
                 }])
 
                 # Update the Payment document using MongoEngine
+                paymentStatus = "SUCCESS" if payment_state == "COMPLETED" else "PENDING"
                 payment = Payment.objects(merchantTransactionId=merchant_transaction_id).first()
                 if payment:
-                    payment.status = payment_state
+                    payment.status = paymentStatus
                     payment.paymentDetails = payment_details
                     payment.save()
 
