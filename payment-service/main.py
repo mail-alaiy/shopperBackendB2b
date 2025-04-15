@@ -2,7 +2,10 @@
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-
+from app.database import init_db
+from dotenv import load_dotenv
+import os
+load_dotenv()
 # Import the router
 from app.routers import payment
 
@@ -22,6 +25,10 @@ app.add_middleware(
 # Include the payment router
 app.include_router(payment.router, tags=["Payment"]) # Added and tag
 
+@app.on_event("startup")
+def startup_event():
+    init_db()
+    
 @app.get("/health-check")
 async def root():
-    return {"message": "Payment Service is running"}
+    return {"message": "Payment Service is running", "MONGO_URL": os.getenv("DB_HOST"), "MONGO_DB": os.getenv("DB_NAME")}

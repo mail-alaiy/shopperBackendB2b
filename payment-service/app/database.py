@@ -1,14 +1,15 @@
+# app/core/database.py
+
 from mongoengine import connect
 import os
 import certifi
 from dotenv import load_dotenv
 
 load_dotenv()
-
-db_uri = os.getenv("DB_HOST")
-db_name = os.getenv("DB_NAME")
-connect(
-    db=db_name,
-    host=db_uri,
-    tlsCAFile=certifi.where()
-)
+def init_db():
+    connect(
+        db=os.getenv("DB_NAME"),
+        host=os.getenv("DB_HOST"),
+        alias="default",
+        tlsCAFile=certifi.where()
+    )

@@ -6,8 +6,7 @@ from app.models import Payment
 from datetime import datetime
 import random
 import base64
-
-router = APIRouter()
+import traceback
 
 router = APIRouter()
 
@@ -18,19 +17,29 @@ async def initiate_payment_for_order(
     authorization: str = Header(...)
 ):
     try:
+        print(f"[LOG] Initiating payment for order_id: {order_id}, user_id: {x_user_id}")
+
         # Step 1: Fetch required data
+        print("[LOG] Fetching order details...")
         order_data = payment_utils.fetch_order_details(order_id, authorization)
+        print(f"[LOG] Order data received: {order_data}")
+
+        print("[LOG] Fetching user details...")
         user_data = payment_utils.fetch_user_details(authorization)
+        print(f"[LOG] User data received: {user_data}")
         
         # Step 2: Validate order and extract payment details
         if order_data.get("merchantId") != x_user_id:
+            print("[ERROR] Order does not belong to the user.")
             raise HTTPException(status_code=403, detail="Forbidden: Order does not belong to user.")
             
         if not (order_data.get("pStatus") == "UP" or order_data.get("pStatus") == "PU"):
+            print(f"[ERROR] Invalid payment status: {order_data.get('pStatus')}")
             raise HTTPException(status_code=400, detail=f"Invalid payment status: {order_data.get('pStatus')}")
-            
+
         total_amount = order_data.get("total_amount")
         if not total_amount or total_amount <= 0:
+            print("[ERROR] Invalid total amount in order details.")
             raise HTTPException(status_code=400, detail="Invalid total amount in order details.")
 
         # Step 3: Determine contact details for payment
@@ -38,12 +47,14 @@ async def initiate_payment_for_order(
         user_email = user_data.get("email")
         
         if not phone_number_for_payment or not user_email:
+            print("[ERROR] Missing phone number or email for payment.")
             raise HTTPException(
                 status_code=400, 
                 detail="Missing contact details for payment (phone or email)."
             )
 
         # Step 4: Initiate payment and return URL
+        print("[LOG] Initiating PhonePe payment request...")
         phonepe_response = payment_utils.phonepePaymentURL(
             amount=total_amount,
             order_id=order_id,
@@ -53,24 +64,33 @@ async def initiate_payment_for_order(
         )
         
         data = phonepe_response.json()
+        print(f"[LOG] PhonePe response received: {data}")
+
         payment_url = data.get("data", {}).get("instrumentResponse", {}).get("redirectInfo", {}).get("url")
 
-        print(data)
         if data.get("success") and payment_url:
             merchant_transaction_id = data.get("data", {}).get("merchantTransactionId")
+            print(f"[LOG] Preparing to save payment with transaction ID: {merchant_transaction_id}")
 
             # Step 5: Store payment record using MongoEngine
-            payment = Payment(
-                merchantTransactionId=merchant_transaction_id,
-                userId=x_user_id,
-                amount=total_amount,
-                orderId=order_id,
-                status="PENDING"
-            )
-            payment.save()  # Synchronous save
+            try:
+                payment = Payment(
+                    merchantTransactionId=merchant_transaction_id,
+                    userId=x_user_id,
+                    amount=float(total_amount),
+                    orderId=order_id,
+                    status="PENDING"
+                )
+                payment.save()  # Synchronous save
+                print("[LOG] Payment saved successfully.")
+            except Exception as save_error:
+                print("[ERROR] Failed to save payment to MongoDB:")
+                print(traceback.format_exc())
+                raise HTTPException(status_code=500, detail="Failed to save payment record.")
 
             return {"paymentUrl": payment_url}
         else:
+            print("[ERROR] Invalid response from payment gateway.")
             raise HTTPException(status_code=502, detail="Invalid response from payment gateway.")
 
     except requests.exceptions.RequestException as e:
@@ -81,11 +101,16 @@ async def initiate_payment_for_order(
         error_detail = f"Failed to connect to {service_name}"
         if getattr(e, "response", None):
             error_detail = f"{service_name} error: {e.response.status_code} - {e.response.text}"
-            
+        print(f"[ERROR] {error_detail}")
         raise HTTPException(status_code=502, detail=error_detail)
-    except HTTPException:
+
+    except HTTPException as http_exc:
+        print(f"[ERROR] HTTPException: {http_exc.detail}")
         raise
+
     except Exception as e:
+        print("[ERROR] Unexpected internal server error:")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal server error.")
 
 
