@@ -104,13 +104,32 @@ async def create_order(
             quantity = max(1, int(cart_item.get("quantity", 1)))
             source = cart_item.get("source")
             sp = prod.get("sp", 0)
-            total_price += quantity*sp
+            # Get appropriate price from variable pricing based on quantity
+            price_to_use = sp
+            
+            if 'variable_pricing' in prod and prod['variable_pricing']:
+                for price_tier in prod['variable_pricing']:
+                    for range_str, price in price_tier.items():
+                        if range_str.startswith('>'):
+                            min_qty = int(range_str[1:])
+                            if quantity >= min_qty:
+                                price_to_use = price
+                                break
+                        else:
+                            range_parts = range_str.split('-')
+                            min_qty = int(range_parts[0])
+                            max_qty = int(range_parts[1])
+                            if min_qty <= quantity <= max_qty:
+                                price_to_use = price
+                                break
+            
+            total_price += quantity * price_to_use
             order_details = OrderDetails(
                 sku=sku_retrieved,
                 sellerSku=sku_retrieved,
                 quantity=quantity,
                 quantityShipped=quantity,
-                consumerPrice=sp,
+                consumerPrice=price_to_use,
                 title=prod.get("name", ""),
                 source = source
             )

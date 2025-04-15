@@ -15,7 +15,7 @@ def verify_password(pw, hash): return bcrypt.checkpw(pw.encode(), hash.encode())
 
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.now(UTC) + timedelta(minutes=15)
+    expire = datetime.now(UTC) + timedelta(days=1)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, ACCESS_TOKEN_SECRET, algorithm=ALGORITHM)
 
