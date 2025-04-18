@@ -1,9 +1,14 @@
-from sqlalchemy import Column, String, DateTime, Enum
+from sqlalchemy import Column, String, DateTime, Enum as SQLAlchemyEnum
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from datetime import datetime
 from .database import Base
 import enum
+
+# Define Role Enum
+class RoleEnum(str, enum.Enum):
+    customer = "customer"
+    admin = "admin"
 
 class BusinessTypeEnum(str, enum.Enum):
     manufacturer = "Manufacturer"
@@ -18,7 +23,7 @@ class User(Base):
 
     # Business Information
     company_name = Column(String, nullable=False)
-    business_type = Column(Enum(BusinessTypeEnum), nullable=False)
+    business_type = Column(SQLAlchemyEnum(BusinessTypeEnum), nullable=False)
     business_street = Column(String, nullable=False)
     business_city = Column(String, nullable=False)
     business_state = Column(String, nullable=False)
@@ -35,5 +40,6 @@ class User(Base):
     # Account Security
     password_hash = Column(String, nullable=False)
 
-    role = Column(String, default="customer")
+    # Use the RoleEnum for the role field
+    role = Column(SQLAlchemyEnum(RoleEnum), default=RoleEnum.customer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)

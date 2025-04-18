@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Path
 from sqlalchemy.orm import Session
 from app import models, schemas, auth
 from app.database import SessionLocal
 from jose import JWTError
 from typing import List
+from uuid import UUID
 
 router = APIRouter()
 
@@ -128,8 +129,24 @@ def update_password(
     db.commit()
     return {"msg": "Password updated successfully"}
 
-# Get all users
-@router.get("/all", response_model=List[schemas.UserOut])
+# Admin: Get all users with pagination
+@router.get("/admin/all", response_model=List[schemas.UserOut])
 def get_all_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """
+    Admin route to get a paginated list of all users.
+    """
     users = db.query(models.User).offset(skip).limit(limit).all()
     return users
+
+# Admin: Get specific user by ID
+@router.get("/admin/user/{user_id}", response_model=schemas.UserOut)
+def admin_get_user_by_id(user_id: UUID = Path(..., description="The UUID of the user to retrieve"), db: Session = Depends(get_db)):
+    """
+    Admin route to get details for a specific user by their ID.
+    """
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+    return user
+
+
