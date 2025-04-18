@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import UUID
 from datetime import datetime
 from enum import Enum
+from .models import RoleEnum
 
 
 class BusinessTypeEnum(str, Enum):
@@ -77,8 +78,9 @@ class UserOut(BaseModel):
     phone_number: str
     email: EmailStr
     gst_number: str
-    role: str
+    role: RoleEnum
     created_at: datetime
 
     class Config:
         orm_mode = True
+        use_enum_values = True
