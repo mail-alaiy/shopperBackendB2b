@@ -2,13 +2,21 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Request
 import requests
 from app.helpers import payment_utils
 import json
+from jose import jwt, JWTError
 from app.models import Payment
 from datetime import datetime
 import random
 import base64
 import traceback
-
+import os
+from requests.exceptions import RequestException
+from dotenv import load_dotenv
+load_dotenv()
 router = APIRouter()
+
+SECRET_KEY = os.getenv("ACCESS_TOKEN_SECRET_UPDATE")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
+ORDER_UPDATE_URL = os.getenv("ORDER_UPDATE_URL")
 
 @router.get("/pay/{order_id}")
 async def initiate_payment_for_order(
@@ -119,18 +127,19 @@ async def initiate_payment_for_order(
 async def phonepe_webhook(request: Request):
     """
     Handles incoming webhook notifications from PhonePe.
-    Logs the received data and returns a success response.
+    Logs the received data, updates the Payment object,
+    and sends a PUT request to update the order status.
     """
     try:
         webhook_data = await request.json()
-        print(f"Received PhonePe webhook data: {webhook_data}")
+        print(f"[LOG] Received PhonePe webhook data: {webhook_data}")
         
         if "response" in webhook_data:
             encoded_response = webhook_data["response"]
+            print("[LOG] Decoding base64 encoded response...")
             decoded_bytes = base64.b64decode(encoded_response)
             decoded_json = json.loads(decoded_bytes.decode('utf-8'))
-            
-            print(f"Decoded PhonePe response: {decoded_json}")
+            print(f"[LOG] Decoded PhonePe response JSON: {decoded_json}")
             
             if decoded_json.get("success") and decoded_json.get("data"):
                 payment_data = decoded_json["data"]
@@ -139,8 +148,9 @@ async def phonepe_webhook(request: Request):
                 amount = payment_data.get("amount")
                 payment_state = payment_data.get("state")
                 response_code = payment_data.get("responseCode")
-                
-                # Build paymentDetails structure
+
+                print(f"[LOG] Merchant Txn ID: {merchant_transaction_id}, Txn ID: {transaction_id}, Amount: {amount}, State: {payment_state}")
+
                 payment_details = json.dumps([{
                     "paymentMode": payment_data.get("paymentInstrument", {}).get("type", "UPI"),
                     "transactionId": transaction_id,
@@ -158,28 +168,52 @@ async def phonepe_webhook(request: Request):
                     }]
                 }])
 
-                # Update the Payment document using MongoEngine
                 paymentStatus = "SUCCESS" if payment_state == "COMPLETED" else "PENDING"
+                print(f"[LOG] Mapped internal payment status: {paymentStatus}")
+
                 payment = Payment.objects(merchantTransactionId=merchant_transaction_id).first()
                 if payment:
+                    print(f"[LOG] Found Payment record in DB. Updating status and payment details.")
                     payment.status = paymentStatus
                     payment.paymentDetails = payment_details
                     payment.save()
+                    print(f"[LOG] Payment record updated successfully.")
+
+                    if paymentStatus == "SUCCESS":
+                        try:
+                            payload = {"order_id": payment.orderId}
+                            print(f"[LOG] Encoding JWT token with payload: {payload}")
+                            token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
+                            print(f"[LOG] Encoded token: {token}")
+
+                            print(f"[LOG] Sending PUT request to ORDER_UPDATE_URL: {ORDER_UPDATE_URL}")
+                            response = requests.put(ORDER_UPDATE_URL, json={"token": token})
+                            response.raise_for_status()
+                            print(f"[LOG] Order update response: {response.status_code} - {response.text}")
+                        except RequestException as put_error:
+                            print(f"[ERROR] Failed to send PUT request to order update URL.")
+                            print(f"[ERROR] Details: {put_error}")
+                            raise HTTPException(status_code=502, detail="Failed to update order status")
+
+                else:
+                    print(f"[WARN] No payment record found for MerchantTransactionId: {merchant_transaction_id}")
 
                 return {
-                    "status": "success", 
+                    "status": "success",
                     "message": "Payment processed",
                     "payment_status": payment_state,
                     "transaction_id": transaction_id
                 }
-            
+
+        print(f"[WARN] Webhook received without 'response' field or invalid structure.")
         return {"status": "success", "message": "Webhook received"}
-    
+
     except json.JSONDecodeError:
-        print("Error decoding JSON from PhonePe webhook")
+        print("[ERROR] Error decoding JSON from PhonePe webhook.")
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
     except Exception as e:
-        print(f"Error processing PhonePe webhook: {e}")
+        print("[ERROR] Unexpected error occurred while processing webhook:")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal server error processing webhook")
 
 # If you need the status check endpoint later:

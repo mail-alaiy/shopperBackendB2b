@@ -4,16 +4,17 @@ from bson import json_util
 import json
 from bson.objectid import ObjectId
 import requests
+from jose import jwt, JWTError
 import app.database
 from app.models import Order, OrderDetails
 from datetime import datetime
 import os
 from app.schema import CreateOrderRequest
-
 router = APIRouter()
 CART_URL = os.getenv("CART_URL")
 PRODUCT_URL = os.getenv("PRODUCT_URL")
-
+ORDER_UPDATE_TOKEN = os.getenv("ACCESS_TOKEN_SECRET_UPDATE")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
 @router.get("/")
 async def get_orders(x_user_id: str = Header(...)):
     try:
@@ -235,21 +236,34 @@ async def delete_order_by_id(order_id: str, x_user_id: str = Header(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/payment-status/{order_id}")
+@router.put("/payment-status")
 async def update_payment_status(
-    order_id: str = Path(..., description="MongoDB Order ID to mark as paid"),
-    x_user_id: str = Header(...),
-    authorization: str = Header(None)
+    body: dict = Body(...)
 ):
     try:
-        if not ObjectId.is_valid(order_id):
-            raise HTTPException(status_code=400, detail="Invalid order ID format")
+        token = body.get("token")
 
-        order = Order.objects(id=order_id, merchantId=x_user_id).first()
+        if not token:
+            raise HTTPException(status_code=400, detail="Missing token in request body")
+
+        # Decode token
+        try:
+            decoded = jwt.decode(token, ORDER_UPDATE_TOKEN, algorithms=[JWT_ALGORITHM])
+        except JWTError as e:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+        order_id = decoded.get("order_id")
+
+        if not order_id or not ObjectId.is_valid(order_id):
+            raise HTTPException(status_code=400, detail="Invalid or missing order ID in token")
+
+        # Look up order
+        order = Order.objects(id=order_id).first()
 
         if not order:
             raise HTTPException(status_code=404, detail="Order not found or not owned by the user")
 
+        # Update payment status
         order.pStatus = "PD"
         order.paidDate = datetime.utcnow()
         order.save()
@@ -259,5 +273,7 @@ async def update_payment_status(
             "payload": json.loads(json_util.dumps(order.to_mongo()))
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
