@@ -2,13 +2,21 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Request
 import requests
 from app.helpers import payment_utils
 import json
+from jose import jwt, JWTError
 from app.models import Payment
 from datetime import datetime
 import random
 import base64
 import traceback
-
+import os
+from requests.exceptions import RequestException
+from dotenv import load_dotenv
+load_dotenv()
 router = APIRouter()
+
+SECRET_KEY = os.getenv("ACCESS_TOKEN_SECRET_UPDATE")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
+ORDER_UPDATE_URL = os.getenv("ORDER_UPDATE_URL")
 
 @router.get("/pay/{order_id}")
 async def initiate_payment_for_order(
@@ -126,93 +134,71 @@ async def phonepe_webhook(request: Request):
 
     try:
         webhook_data = await request.json()
-        print(f"Received PhonePe webhook data: {webhook_data}")
+        print(f"[LOG] Received PhonePe webhook data: {webhook_data}")
+        
+        if "response" in webhook_data:
+            encoded_response = webhook_data["response"]
+            print("[LOG] Decoding base64 encoded response...")
+            decoded_bytes = base64.b64decode(encoded_response)
+            decoded_json = json.loads(decoded_bytes.decode('utf-8'))
+            print(f"[LOG] Decoded PhonePe response JSON: {decoded_json}")
+            
+            if decoded_json.get("success") and decoded_json.get("data"):
+                payment_data = decoded_json["data"]
+                merchant_transaction_id = payment_data.get("merchantTransactionId")
+                transaction_id = payment_data.get("transactionId")
+                amount = payment_data.get("amount")
+                payment_state = payment_data.get("state")
+                response_code = payment_data.get("responseCode")
 
-        if "response" not in webhook_data:
-             print("Webhook data missing 'response' field.")
-             return {"status": "ignored", "message": "Webhook ignored, missing response field"}
+                print(f"[LOG] Merchant Txn ID: {merchant_transaction_id}, Txn ID: {transaction_id}, Amount: {amount}, State: {payment_state}")
 
-        encoded_response = webhook_data["response"]
-        decoded_bytes = base64.b64decode(encoded_response)
-        decoded_json = json.loads(decoded_bytes.decode('utf-8'))
-
-        print(f"Decoded PhonePe response: {decoded_json}")
-
-        if not decoded_json.get("success") or not decoded_json.get("data"):
-            print("Decoded response indicates failure or missing data.")
-            return {"status": "ignored", "message": "Webhook ignored, unsuccessful or missing data"}
-
-        payment_data = decoded_json["data"]
-        merchant_transaction_id = payment_data.get("merchantTransactionId")
-        transaction_id = payment_data.get("transactionId") # PhonePe's transaction ID
-        amount = payment_data.get("amount") # Amount in paise
-        payment_state = payment_data.get("state") # e.g., COMPLETED, FAILED
-        response_code = payment_data.get("responseCode") # e.g., SUCCESS
-
-        if not merchant_transaction_id:
-            print("Merchant Transaction ID missing from webhook data.")
-            # Cannot update our record without this ID
-            return {"status": "error", "message": "Missing merchantTransactionId"}
-
-        # Fetch the payment record from DB
-        payment = Payment.objects(merchantTransactionId=merchant_transaction_id).first()
-        if not payment:
-            print(f"Payment record not found for MTID: {merchant_transaction_id}")
-            # Cannot proceed without the payment record (which contains userId, orderId)
-            return {"status": "error", "message": "Payment record not found"}
-
-        # Build paymentDetails structure (optional, keep if useful)
-        # ... (your existing paymentDetails logic) ...
-        payment_details_json = json.dumps([{
-            "paymentMode": payment_data.get("paymentInstrument", {}).get("type", "UPI"),
-            "transactionId": transaction_id,
-            "timestamp": int(datetime.utcnow().timestamp() * 1000),
-            "amount": int(amount),
-            "state": payment_state,
-            "splitInstruments": [{
-                "amount": int(amount),
-                "rail": {
-                    "type": "PG",
+                payment_details = json.dumps([{
+                    "paymentMode": payment_data.get("paymentInstrument", {}).get("type", "UPI"),
                     "transactionId": transaction_id,
-                    "serviceTransactionId": f"PG{datetime.utcnow().strftime('%y%m%d%H%M%S')}{random.randint(1000000000, 9999999999)}"
-                },
-                "instrument": payment_data.get("paymentInstrument", {})
-            }]
-        }])
+                    "timestamp": int(datetime.utcnow().timestamp() * 1000),
+                    "amount": int(amount),
+                    "state": payment_state,
+                    "splitInstruments": [{
+                        "amount": int(amount),
+                        "rail": {
+                            "type": "PG",
+                            "transactionId": transaction_id,
+                            "serviceTransactionId": f"PG{datetime.utcnow().strftime('%y%m%d%H%M%S')}{random.randint(1000000000, 9999999999)}"
+                        },
+                        "instrument": payment_data.get("paymentInstrument", {})
+                    }]
+                }])
 
-        original_status = payment.status
-        new_status = "UNKNOWN" # Default
+                paymentStatus = "SUCCESS" if payment_state == "COMPLETED" else "PENDING"
+                print(f"[LOG] Mapped internal payment status: {paymentStatus}")
 
-        if payment_state == "COMPLETED" and response_code == "SUCCESS":
-            new_status = "SUCCESS"
-        elif payment_state == "FAILED":
-            new_status = "FAILED"
-        # Add more states if needed (PENDING, etc.)
-        else:
-            new_status = payment_state # Store the state if not explicitly success/failed
+                payment = Payment.objects(merchantTransactionId=merchant_transaction_id).first()
+                if payment:
+                    print(f"[LOG] Found Payment record in DB. Updating status and payment details.")
+                    payment.status = paymentStatus
+                    payment.paymentDetails = payment_details
+                    payment.save()
+                    print(f"[LOG] Payment record updated successfully.")
 
-        # Update Payment Document
-        payment.status = new_status
-        payment.paymentDetails = payment_details_json # Update with latest details
-        # Add phonepe's transaction ID if you want to store it
-        # payment.providerTransactionId = transaction_id
-        payment.save()
-        print(f"Payment record {merchant_transaction_id} updated to status: {new_status}")
+                    if paymentStatus == "SUCCESS":
+                        try:
+                            payload = {"order_id": payment.orderId}
+                            print(f"[LOG] Encoding JWT token with payload: {payload}")
+                            token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
+                            print(f"[LOG] Encoded token: {token}")
 
-        # --- Send Confirmation Email on Success ---
-        if new_status == "SUCCESS" and original_status != "SUCCESS": # Only send if status changed to SUCCESS
-            try:
-                # Pass necessary details: user ID, amount (in paise), order ID
-                payment_utils.send_payment_confirmation_email(
-                    user_id=payment.userId,
-                    amount=float(amount), # Ensure amount is float/int
-                    order_id=payment.orderId
-                )
-            except Exception as email_exc:
-                # Log email sending errors but don't fail the webhook response
-                print(f"Error during email sending trigger: {email_exc}")
-                print(traceback.format_exc())
-        # ------------------------------------------
+                            print(f"[LOG] Sending PUT request to ORDER_UPDATE_URL: {ORDER_UPDATE_URL}")
+                            response = requests.put(ORDER_UPDATE_URL, json={"token": token})
+                            response.raise_for_status()
+                            print(f"[LOG] Order update response: {response.status_code} - {response.text}")
+                        except RequestException as put_error:
+                            print(f"[ERROR] Failed to send PUT request to order update URL.")
+                            print(f"[ERROR] Details: {put_error}")
+                            raise HTTPException(status_code=502, detail="Failed to update order status")
+
+                else:
+                    print(f"[WARN] No payment record found for MerchantTransactionId: {merchant_transaction_id}")
 
         return {
             "status": "success",
@@ -220,7 +206,7 @@ async def phonepe_webhook(request: Request):
         }
 
     except json.JSONDecodeError:
-        print("Error decoding JSON from PhonePe webhook")
+        print("[ERROR] Error decoding JSON from PhonePe webhook.")
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
     except Exception as e:
         # Log detailed error, including decoded data if available
