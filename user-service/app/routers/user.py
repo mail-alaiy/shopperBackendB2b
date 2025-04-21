@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Path
+from fastapi import APIRouter, Depends, HTTPException, Header, Path, Request
 from sqlalchemy.orm import Session
 from app import models, schemas, auth
 from app.database import SessionLocal
@@ -149,4 +149,9 @@ def admin_get_user_by_id(user_id: UUID = Path(..., description="The UUID of the 
         raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
     return user
 
-
+@router.get("/debug")
+def debug_header(request: Request):
+    headers = dict(request.headers)
+    return {
+        "headers": headers
+    }
