@@ -127,9 +127,11 @@ async def initiate_payment_for_order(
 async def phonepe_webhook(request: Request):
     """
     Handles incoming webhook notifications from PhonePe.
-    Logs the received data, updates the Payment object,
-    and sends a PUT request to update the order status.
+    Updates payment status and triggers confirmation email on success.
     """
+    decoded_json = None # Define outside try block
+    merchant_transaction_id = None # Define outside try block
+
     try:
         webhook_data = await request.json()
         print(f"[LOG] Received PhonePe webhook data: {webhook_data}")
@@ -198,23 +200,27 @@ async def phonepe_webhook(request: Request):
                 else:
                     print(f"[WARN] No payment record found for MerchantTransactionId: {merchant_transaction_id}")
 
-                return {
-                    "status": "success",
-                    "message": "Payment processed",
-                    "payment_status": payment_state,
-                    "transaction_id": transaction_id
-                }
-
-        print(f"[WARN] Webhook received without 'response' field or invalid structure.")
-        return {"status": "success", "message": "Webhook received"}
+        return {
+            "status": "success",
+            "message": f"Webhook processed for {merchant_transaction_id}. Status: {new_status}"
+        }
 
     except json.JSONDecodeError:
         print("[ERROR] Error decoding JSON from PhonePe webhook.")
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
     except Exception as e:
-        print("[ERROR] Unexpected error occurred while processing webhook:")
+        # Log detailed error, including decoded data if available
+        error_details = f"Error processing PhonePe webhook: {e}"
+        if decoded_json:
+            error_details += f" | Decoded Data MTID: {decoded_json.get('data', {}).get('merchantTransactionId', 'N/A')}"
+        elif merchant_transaction_id:
+             error_details += f" | MTID: {merchant_transaction_id}"
+        print(error_details)
         print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail="Internal server error processing webhook")
+        # Return success to PhonePe to avoid retries for processing errors,
+        # but log the failure clearly. Consider specific error responses if needed.
+        # raise HTTPException(status_code=500, detail="Internal server error processing webhook")
+        return {"status": "error", "message": "Internal server error during webhook processing"}
 
 # If you need the status check endpoint later:
 # @router.get("/status/{merchantTransactionID}")
