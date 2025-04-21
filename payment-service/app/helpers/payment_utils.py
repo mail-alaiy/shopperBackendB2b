@@ -6,6 +6,7 @@ import requests
 import os
 import app.constants as constants # Use relative import for constants
 from fastapi import HTTPException
+from . import email_helper # Import the new email helper
 
 # Load Order Service URL once from environment
 ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL")
@@ -151,4 +152,34 @@ def fetch_user_details(authorization: str):
         raise
     except Exception as e:
         print(f"Unexpected error fetching user details: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error while fetching user details.") 
+        raise HTTPException(status_code=500, detail="Internal server error while fetching user details.")
+
+def send_payment_confirmation_email(user_id: str, amount: float, order_id: str):
+    """Gets user email and triggers sending of payment confirmation email."""
+    print(f"Attempting to send payment confirmation for order {order_id} to user {user_id}")
+
+    # 1. Get User Email
+    recipient_email = email_helper.get_user_email(user_id)
+
+    if not recipient_email:
+        print(f"Could not retrieve email for user {user_id}. Skipping payment confirmation email.")
+        return
+
+    # 2. Construct Email Content
+    # Ensure amount is formatted nicely (e.g., two decimal places)
+    formatted_amount = "{:.2f}".format(amount / 100.0) # Assuming amount is in paise
+    subject = f"Payment Confirmation for Order {order_id}"
+    html_body = f"""
+        <p>Dear User,</p>
+        <p>Your payment of ₹{formatted_amount} for order <strong>{order_id}</strong> has been successfully processed.</p>
+        <p>Thank you for your purchase!</p>
+        <p>You can view your order details in your account.</p>
+    """
+
+    # 3. Trigger Email Sending via User Service
+    success = email_helper.trigger_send_email(recipient_email, subject, html_body)
+
+    if success:
+        print(f"Payment confirmation email request triggered successfully for user {user_id}, order {order_id}")
+    else:
+        print(f"Failed to trigger payment confirmation email request for user {user_id}, order {order_id}") 
