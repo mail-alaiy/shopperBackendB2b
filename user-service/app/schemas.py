@@ -79,8 +79,15 @@ class UserOut(BaseModel):
     email: EmailStr
     gst_number: str
     role: RoleEnum
+    is_active: bool
     created_at: datetime
 
     class Config:
         orm_mode = True
         use_enum_values = True
+
+
+class EmailRequest(BaseModel):
+    recipient_email: EmailStr
+    subject: str
+    html_body: str
