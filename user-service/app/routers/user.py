@@ -32,15 +32,23 @@ def get_user_by_header(x_user_id: str = Header(..., alias="x-user-id"), db: Sess
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
-# --- Authentication Setup ---
+# --- Environment Variable Configuration ---
 # Load the expected API key from environment variables
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY")
+# Base URL for the frontend page that handles email verification
+FRONTEND_VERIFICATION_URL = os.getenv("FRONTEND_VERIFICATION_URL") # e.g., "https://yourdomain.com/verify-email"
+
 if not INTERNAL_API_KEY:
     # This service cannot function securely for internal calls without the key
     print("CRITICAL ERROR: INTERNAL_API_KEY environment variable not set in user-service.")
-    # You might raise an exception here to prevent startup, or handle it cautiously.
-    # For now, we'll let endpoints fail if the key is missing.
+    # Consider raising an exception here to prevent startup
 
+if not FRONTEND_VERIFICATION_URL:
+    # Log a warning if the frontend URL is not set. The fallback might be less user-friendly.
+    print("WARNING: FRONTEND_VERIFICATION_URL environment variable not set. Verification links might not work as expected or will use backend URL.")
+    # Optionally define a fallback or raise error if it's mandatory
+
+# --- Authentication Setup ---
 async def verify_internal_api_key(x_internal_api_key: str = Header(None, alias="X-Internal-API-Key")):
     """Dependency to verify the internal API key header."""
     if not INTERNAL_API_KEY:
@@ -74,7 +82,7 @@ router = APIRouter()
 def signup(data: schemas.UserCreate, request: Request, db: Session = Depends(get_db)):
     """
     Registers a new user, saves them as inactive, creates a verification token,
-    and sends a verification email.
+    and sends a verification email pointing to the frontend verification page.
     """
     if db.query(models.User).filter_by(email=data.email).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
@@ -104,14 +112,28 @@ def signup(data: schemas.UserCreate, request: Request, db: Session = Depends(get
 
     db.commit()
     db.refresh(new_user)
+    db.refresh(verification_token) # Ensure token value is loaded
 
-    base_url = str(request.base_url).rstrip('/')
-    verification_link = f"{base_url}/verify-email/{verification_token.token}"
+    # Construct verification link pointing to the frontend
+    if FRONTEND_VERIFICATION_URL:
+        # Append token as a query parameter
+        verification_link = f"{FRONTEND_VERIFICATION_URL.rstrip('/')}?token={verification_token.token}"
+        print(f"Generated frontend verification link: {verification_link}")
+    else:
+        # Fallback: If frontend URL isn't set, log error and maybe don't send email or send backend link with warning
+        # Sending backend link directly as a fallback (less ideal)
+        base_url = str(request.base_url).rstrip('/')
+        verification_link = f"{base_url}/verify-email/{verification_token.token}"
+        print(f"CRITICAL WARNING: FRONTEND_VERIFICATION_URL not set. Falling back to direct backend link: {verification_link}")
+        # Consider raising an internal server error if frontend URL is essential
+        # raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server configuration error: Frontend verification URL not set.")
 
     try:
+        # The send_verification_email helper now receives the frontend link
         send_verification_email(new_user.email, verification_link)
     except Exception as e:
         print(f"Failed to send verification email for {new_user.email}: {e}")
+        # Consider implications if email sending fails (e.g., background retry, marking user differently)
 
     return {"msg": "User registered successfully. Please check your email to verify your account."}
 
