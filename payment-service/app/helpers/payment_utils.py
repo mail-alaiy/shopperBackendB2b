@@ -176,8 +176,7 @@ def send_payment_confirmation_email(user_id: str, amount: float, order_id: str):
         <p>You can view your order details in your account.</p>
     """
 
-    # 3. Trigger Email Sending via User Service
-    success = email_helper.trigger_send_email(recipient_email, subject, html_body)
+    
 
     if success:
         print(f"Payment confirmation email request triggered successfully for user {user_id}, order {order_id}")

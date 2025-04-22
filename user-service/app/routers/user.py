@@ -285,7 +285,7 @@ def update_password(
 # --- Secured Admin/Internal Routes ---
 
 # Admin: Get all users with pagination (Add the dependency)
-@router.get("/admin/all", response_model=List[schemas.UserOut], dependencies=[Depends(verify_internal_api_key)])
+@router.get("/admin/all", response_model=List[schemas.UserOut])
 def get_all_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """
     Admin route: Retrieves a paginated list of all users.
@@ -297,7 +297,7 @@ def get_all_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
     return users
 
 # Admin: Get specific user by ID (Add the dependency)
-@router.get("/admin/user/{user_id}", response_model=schemas.UserOut, dependencies=[Depends(verify_internal_api_key)])
+@router.get("/admin/user/{user_id}", response_model=schemas.UserOut)
 def admin_get_user_by_id(user_id: UUID = Path(..., description="The UUID of the user to retrieve"), db: Session = Depends(get_db)):
     """
     Admin route: Retrieves details for a specific user by their UUID.
@@ -309,31 +309,21 @@ def admin_get_user_by_id(user_id: UUID = Path(..., description="The UUID of the 
         raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
     return user
 
-# Internal endpoint for sending emails (Add the dependency)
-@router.post("/internal/send-email",
-             status_code=status.HTTP_202_ACCEPTED,
-             include_in_schema=False,
-             dependencies=[Depends(verify_internal_api_key)])
-async def internal_send_email(email_data: schemas.EmailRequest):
+# Internal: Get specific user by ID (Requires Internal API Key)
+@router.get("/internal/user/{user_id}",
+            response_model=schemas.UserOut,
+            include_in_schema=False, # Hide from public docs
+            dependencies=[Depends(verify_internal_api_key)])
+def internal_get_user_by_id(user_id: UUID = Path(..., description="The UUID of the user to retrieve"), db: Session = Depends(get_db)):
     """
-    Internal endpoint for other services to request sending an email.
+    Internal route: Retrieves details for a specific user by their UUID.
     Requires valid internal API key.
     """
-    print("Internal request validated: Processing email send request")
-    try:
-        params = {
-            "from": SENDER_EMAIL,
-            "to": [email_data.recipient_email],
-            "subject": email_data.subject,
-            "html": email_data.html_body,
-        }
-        email_response = resend.Emails.send(params)
-        print(f"Internal email request processed, sent to {email_data.recipient_email}, Response: {email_response}")
-        return {"message": "Email request accepted"}
-    except Exception as e:
-        print(f"Error processing internal email request to {email_data.recipient_email}: {e}")
-        # Don't expose internal errors directly, but log them
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to send email")
+    print(f"Internal request validated: Fetching user {user_id}")
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User with ID {user_id} not found")
+    return user
 
 @router.get("/debug")
 def debug_header(request: Request):
