@@ -56,7 +56,7 @@ class VerificationToken(Base):
 
     token = Column(String, primary_key=True, unique=True, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
 
     user = relationship("User", back_populates="verification_tokens")
 

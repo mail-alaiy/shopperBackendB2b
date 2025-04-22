@@ -23,7 +23,7 @@ services:
   user-service:
     build: .
     ports:
-      - "8000:8000"
+      - "8000:80"
     depends_on:
       - db
     env_file:

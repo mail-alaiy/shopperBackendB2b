@@ -182,14 +182,8 @@ def verify_email(token: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated user not found")
 
     if user.is_active:
-        # User already active, just clean up the token
         db.delete(token_record)
         db.commit()
-        # Optionally send another confirmation? Or just return.
-        # try:
-        #     send_confirmation_email(user.email)
-        # except Exception as e:
-        #     print(f"Error re-sending confirmation email for already active user {user.email}: {e}")
         return {"msg": "Account already verified."}
 
     # Activate user and delete the token
