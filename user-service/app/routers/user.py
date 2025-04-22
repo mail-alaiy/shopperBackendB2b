@@ -117,7 +117,7 @@ def signup(data: schemas.UserCreate, request: Request, db: Session = Depends(get
     # Construct verification link pointing to the frontend
     if FRONTEND_VERIFICATION_URL:
         # Append token as a query parameter
-        verification_link = f"{FRONTEND_VERIFICATION_URL.rstrip('/')}?token={verification_token.token}"
+        verification_link = f"{FRONTEND_VERIFICATION_URL}token={verification_token.token}"
         print(f"Generated frontend verification link: {verification_link}")
     else:
         # Fallback: If frontend URL isn't set, log error and maybe don't send email or send backend link with warning
