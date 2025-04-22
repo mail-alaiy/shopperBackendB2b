@@ -41,7 +41,7 @@ def phonepePaymentURL(amount: int, order_id: str, user_id: str, phone_number: st
         "merchantTransactionId": merchantTransactionID,
         "merchantUserId": merchantUserId,
         "redirectUrl": constants.redirect_url,
-        "redirectMode": "POST",
+        "redirectMode": "REDIRECT",
         "callbackUrl": constants.webhook_url,
         "merchantOrderId": order_id,
         "mobileNumber": mobileNumber,
