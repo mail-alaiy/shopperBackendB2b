@@ -4,7 +4,7 @@ from app.helpers import payment_utils, email_helper
 import json
 from jose import jwt, JWTError
 from app.models import Payment
-from datetime import datetime
+from datetime import datetime, timezone
 import random
 import base64
 import traceback
@@ -149,6 +149,7 @@ async def phonepe_webhook(request: Request):
                 merchant_transaction_id = payment_data.get("merchantTransactionId")
                 transaction_id = payment_data.get("transactionId") # PhonePe's Txn ID
                 amount = payment_data.get("amount") # Amount is in paise
+                print(f"DEBUG: Amount extracted: {amount}, Type: {type(amount)}")
                 payment_state = payment_data.get("state")
                 response_code = payment_data.get("responseCode") # e.g., SUCCESS, PAYMENT_ERROR
 
@@ -177,7 +178,7 @@ async def phonepe_webhook(request: Request):
                             "providerStatus": payment_state,
                             "responseCode": response_code,
                             "paymentInstrument": payment_data.get("paymentInstrument", {}),
-                            "timestamp": datetime.utcnow().isoformat()
+                            "timestamp": datetime.now(timezone.utc).isoformat()
                         }
                         payment.paymentDetails = json.dumps(payment_details_dict)
                         payment.save()
@@ -217,10 +218,11 @@ async def phonepe_webhook(request: Request):
                         if user_id_for_email:
                             print(f"[LOG] Attempting to send confirmation email for user: {user_id_for_email}")
                             user_email = email_helper.get_user_email(user_id_for_email)
+                            print(f"DEBUG: User email retrieved: {user_email}, Type: {type(user_email)}")
                             if user_email:
                                 subject = f"Payment Confirmation for Order {payment.orderId}"
                                 # Convert paise to rupees for display
-                                amount_in_rupees = amount / 100.0
+                                amount_in_rupees = float(amount) / 100.0
                                 html_body = (
                                     f"<h1>Payment Successful!</h1>"
                                     f"<p>Thank you for your payment of ₹{amount_in_rupees:.2f} for order ID {payment.orderId}.</p>"
