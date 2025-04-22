@@ -31,7 +31,7 @@ class UserBase(BaseModel):
     gst_number: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class UserCreate(UserBase):
@@ -57,7 +57,7 @@ class UserUpdate(BaseModel):
     gst_number: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class PasswordUpdate(BaseModel):
@@ -83,7 +83,7 @@ class UserOut(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
         use_enum_values = True
 
 
