@@ -335,4 +335,9 @@ async def internal_send_email(email_data: schemas.EmailRequest):
         # Don't expose internal errors directly, but log them
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to send email")
 
-
+@router.get("/debug")
+def debug_header(request: Request):
+    headers = dict(request.headers)
+    return {
+        "headers": headers
+    }
