@@ -18,13 +18,32 @@ SECRET_KEY = os.getenv("ACCESS_TOKEN_SECRET_UPDATE")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
 ORDER_UPDATE_URL = os.getenv("ORDER_UPDATE_URL")
 
+
+def extract_user_id_from_token(auth_header: str):
+    try:
+        scheme, token = auth_header.strip().split()
+        if scheme.lower() != "bearer":
+            raise HTTPException(status_code=401, detail="Invalid token scheme")
+
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Missing user ID in token")
+
+        return user_id
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Malformed authorization header")
+
+
 @router.get("/pay/{order_id}")
 async def initiate_payment_for_order(
     order_id: str,
-    x_user_id: str = Header(...),
     authorization: str = Header(...)
 ):
     try:
+        x_user_id = extract_user_id_from_token(authorization)
         print(f"[LOG] Initiating payment for order_id: {order_id}, user_id: {x_user_id}")
 
         # Step 1: Fetch required data
