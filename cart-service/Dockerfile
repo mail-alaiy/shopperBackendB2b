@@ -1,10 +1,14 @@
-FROM python:3.11-slim
+# Use AWS Lambda's base image for Python 3.11
+FROM public.ecr.aws/lambda/python:3.11
 
-WORKDIR /app
-
+# Copy dependencies and install them
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy application files
+COPY ./app ./app
+COPY main.py .
+COPY .env .
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"] 
+# Lambda will now correctly find this
+CMD ["main.handler"]

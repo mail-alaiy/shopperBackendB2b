@@ -5,13 +5,14 @@ from dotenv import load_dotenv
 from app.database import init_db
 from dotenv import load_dotenv
 import os
+from mangum import Mangum
 load_dotenv()
 # Import the router
 from app.routers import payment
 
 load_dotenv() # Load environment variables from .env file
 
-app = FastAPI(title="Payment Service")
+app = FastAPI(title="Payment Service", root_path="/payments")
 
 # Add CORS middleware if needed (adjust origins as necessary)
 app.add_middleware(
@@ -32,3 +33,5 @@ def startup_event():
 @app.get("/health-check")
 async def root():
     return {"message": "Payment Service is running", "MONGO_URL": os.getenv("DB_HOST"), "MONGO_DB": os.getenv("DB_NAME")}
+
+handler = Mangum(app)
