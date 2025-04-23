@@ -20,16 +20,21 @@ def get_db():
         db.close()
 
 # Reusable dependency: Get user from x-user-id header
-def get_user_by_header(x_user_id: str = Header(..., alias="x-user-id"), db: Session = Depends(get_db)):
-    """
-    Dependency to retrieve a user based on the 'x-user-id' header.
+def get_user_by_header(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    event = request.scope.get("aws.event", {})
+    authorizer = event.get("requestContext", {}).get("authorizer", {})
 
-    Raises:
-        HTTPException(404): If the user ID from the header is not found.
-    """
-    user = db.query(models.User).filter(models.User.id == x_user_id).first()
+    user_id = authorizer.get("userId")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing userId in requestContext.authorizer")
+
+    user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     return user
 
 # --- Authentication Setup ---
