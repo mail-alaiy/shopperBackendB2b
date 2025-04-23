@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Dict
+from typing import Dict, Optional, List
 from enum import Enum
 
 class ProductSource(str, Enum):
@@ -10,10 +10,12 @@ class ProductSource(str, Enum):
 class CartItemDetails(BaseModel):
     quantity: int
     source: ProductSource
+    variantIndex: Optional[int] = None
 
 class AddCartItemRequest(BaseModel):
     quantity: int = Field(..., gt=0) # Ensure quantity is positive
     source: ProductSource
+    variantIndex: Optional[int] = None
 
 class CartResponse(BaseModel):
-    items: Dict[str, CartItemDetails] 
+    items: Dict[str, List[CartItemDetails]] 

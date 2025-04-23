@@ -1,10 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends, Header, Request
+from fastapi import APIRouter, HTTPException, Depends, Header, Request, Query
 from typing import Dict, Optional, List
 import redis
 import json
 from dotenv import load_dotenv
 from app.schemas import CartResponse, CartItemDetails, ProductSource, AddCartItemRequest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 import os
 
 load_dotenv()
@@ -19,6 +19,25 @@ redis_client = redis.Redis(host="redis-62ad01f163fa3b2a.elb.ap-southeast-2.amazo
 def get_cart_key(user_id: str) -> str:
     return f"cart:{user_id}"
 
+# Helper function to find a variant in a list
+def find_variant_index(items: List[Dict], variant_index: Optional[int]) -> int:
+    for i, item in enumerate(items):
+        if item.get("variantIndex") == variant_index:
+            return i
+    return -1
+
+# Helper function to parse cart items from Redis
+def parse_cart_items(items_json_list: List[str]) -> List[CartItemDetails]:
+    parsed_items = []
+    for item_json in items_json_list:
+        try:
+            item_data = json.loads(item_json)
+            parsed_items.append(CartItemDetails(**item_data))
+        except (json.JSONDecodeError, TypeError, KeyError, ValidationError):
+            # Optionally log corrupted item data
+            continue # Skip corrupted items
+    return parsed_items
+
 @router.get("/debug")
 async def debug_headers(request: Request):
     print(dict(request.headers))
@@ -26,23 +45,40 @@ async def debug_headers(request: Request):
 
 @router.get("/", response_model=CartResponse)
 async def get_cart(x_user_id: str = Header(...)):
-    """Get the contents of a user's cart"""
+    """Get the contents of a user's cart, supporting variants."""
     cart_key = get_cart_key(x_user_id)
     cart_data_raw = redis_client.hgetall(cart_key)
-    
-    cart_items = {}
-    if cart_data_raw:
-        for product_id, item_json in cart_data_raw.items():
-            try:
-                item_data = json.loads(item_json)
-                # Validate data against the Pydantic model
-                cart_items[product_id] = CartItemDetails(**item_data)
-            except (json.JSONDecodeError, TypeError, KeyError):
-                # Handle cases where data in Redis is corrupted or not in the expected format
-                # Optionally log this error
-                continue # Skip corrupted item
 
-    return CartResponse(items=cart_items)
+    cart_items_response: Dict[str, List[CartItemDetails]] = {}
+    if cart_data_raw:
+        for product_id, items_json in cart_data_raw.items():
+            try:
+                # items_json is expected to be a JSON string of a list of variant dicts
+                items_list = json.loads(items_json)
+                if not isinstance(items_list, list):
+                    # Handle potential data corruption if it's not a list
+                    # Optionally log this error
+                    continue # Skip this product_id
+
+                product_variants = []
+                for item_data in items_list:
+                     # Validate each item against the Pydantic model
+                    try:
+                        product_variants.append(CartItemDetails(**item_data))
+                    except (TypeError, KeyError, ValidationError):
+                        # Handle cases where individual variant data is corrupted
+                        # Optionally log this error
+                        continue # Skip corrupted variant item
+                
+                if product_variants: # Only add if there are valid variants
+                    cart_items_response[product_id] = product_variants
+
+            except (json.JSONDecodeError, TypeError):
+                # Handle cases where the entire value for a product_id is corrupted
+                # Optionally log this error
+                continue # Skip corrupted product_id entry
+
+    return CartResponse(items=cart_items_response)
 
 @router.post("/items/{product_id}")
 async def add_to_cart(
@@ -50,41 +86,61 @@ async def add_to_cart(
     item_data: AddCartItemRequest,
     x_user_id: str = Header(...)
 ):
-    """Add an item to the cart or update its quantity if source matches."""
+    """Add an item/variant to the cart or update quantity if source and variantIndex match."""
     cart_key = get_cart_key(x_user_id)
-    print(REDIS_HOST)
     
-    # Check if item already exists
-    existing_item_json = redis_client.hget(cart_key, product_id)
-    
-    if existing_item_json:
+    # Get current list of variants for the product, if any
+    existing_items_json = redis_client.hget(cart_key, product_id)
+    variants: List[Dict] = [] # Store as list of dicts before saving
+    if existing_items_json:
         try:
-            existing_item = CartItemDetails(**json.loads(existing_item_json))
-            # Only update quantity if the source matches the existing item's source
-            if existing_item.source == item_data.source:
-                new_quantity = existing_item.quantity + item_data.quantity
-                updated_item_data = CartItemDetails(quantity=new_quantity, source=item_data.source)
-            else:
-                # If source differs, overwrite the existing item (or handle as per specific business logic)
-                # Current logic: Overwrite with new item data
-                updated_item_data = CartItemDetails(quantity=item_data.quantity, source=item_data.source)
-                
-        except (json.JSONDecodeError, TypeError, KeyError):
-            # Handle corrupted data - overwrite with new item
-             updated_item_data = CartItemDetails(quantity=item_data.quantity, source=item_data.source)
-    else:
-        # Item does not exist, add new item
-        updated_item_data = CartItemDetails(quantity=item_data.quantity, source=item_data.source)
+            variants = json.loads(existing_items_json)
+            if not isinstance(variants, list): # Ensure it's a list
+                variants = [] # Reset if data is corrupt
+        except json.JSONDecodeError:
+            variants = [] # Reset if data is corrupt
+            
+    # Find if the specific variant (matched by variantIndex) already exists
+    variant_match_index = find_variant_index(variants, item_data.variantIndex)
 
-    # Store as JSON string
-    redis_client.hset(cart_key, product_id, updated_item_data.model_dump_json())
+    updated = False
+    if variant_match_index != -1:
+        # Variant exists, check source
+        existing_variant = variants[variant_match_index]
+        if existing_variant.get("source") == item_data.source.value:
+            # Source matches, update quantity
+            existing_variant["quantity"] += item_data.quantity
+            updated = True
+        else:
+            # Source differs, overwrite the variant (as per original logic)
+            variants[variant_match_index] = {
+                "quantity": item_data.quantity,
+                "source": item_data.source.value,
+                "variantIndex": item_data.variantIndex
+            }
+            updated = True
     
-    return {"message": "Item added/updated in cart", "product_id": product_id, "details": updated_item_data}
+    if not updated:
+         # Variant doesn't exist or source differed, add as new variant
+        variants.append({
+            "quantity": item_data.quantity,
+            "source": item_data.source.value,
+            "variantIndex": item_data.variantIndex
+        })
 
-# Define request model for PATCH
+    # Store the updated list of variants as a JSON string
+    redis_client.hset(cart_key, product_id, json.dumps(variants))
+
+    # Prepare response detail matching the added/updated item structure
+    response_detail = next((v for i, v in enumerate(variants) if find_variant_index([v], item_data.variantIndex) != -1), None)
+
+    return {"message": "Item added/updated in cart", "product_id": product_id, "details": response_detail}
+
+# Define request model for PATCH including variantIndex
 class CartItemUpdateRequest(BaseModel):
     quantity: Optional[int] = None
-    source: Optional[str] = None  # Use the appropriate type based on your ProductSource enum
+    source: Optional[ProductSource] = None # Use the enum type
+    variantIndex: Optional[int] = None # Add variantIndex to specify which item
 
 @router.patch("/items/{product_id}")
 async def update_cart_item(
@@ -92,17 +148,27 @@ async def update_cart_item(
     update_data: CartItemUpdateRequest,
     x_user_id: str = Header(...)
 ):
-    """Partially update an item in the cart (quantity and/or source)."""
+    """Partially update a specific item variant in the cart."""
     cart_key = get_cart_key(x_user_id)
-    existing_item_json = redis_client.hget(cart_key, product_id)
+    existing_items_json = redis_client.hget(cart_key, product_id)
 
-    if not existing_item_json:
-        raise HTTPException(status_code=404, detail="Item not found in cart")
+    if not existing_items_json:
+        raise HTTPException(status_code=404, detail="Product not found in cart")
 
     try:
-        existing_item = CartItemDetails(**json.loads(existing_item_json))
-    except (json.JSONDecodeError, TypeError, KeyError):
+        variants = json.loads(existing_items_json)
+        if not isinstance(variants, list):
+             raise HTTPException(status_code=500, detail="Cart item data is corrupted")
+    except (json.JSONDecodeError, TypeError):
         raise HTTPException(status_code=500, detail="Error reading cart item data")
+
+    # Find the specific variant to update
+    variant_match_index = find_variant_index(variants, update_data.variantIndex)
+
+    if variant_match_index == -1:
+         raise HTTPException(status_code=404, detail="Specific variant not found in cart")
+
+    target_variant = variants[variant_match_index]
 
     # Handle quantity update
     if update_data.quantity is not None:
@@ -110,46 +176,77 @@ async def update_cart_item(
             raise HTTPException(status_code=400, detail="Quantity cannot be negative")
         
         if update_data.quantity == 0:
-            redis_client.hdel(cart_key, product_id)
-            return {"message": "Item removed from cart"}
+            # Remove this specific variant from the list
+            variants.pop(variant_match_index)
+            # If list is now empty, remove the product from the cart hash
+            if not variants:
+                redis_client.hdel(cart_key, product_id)
+                return {"message": "Item variant removed from cart"}
+            else:
+                # Update redis with the modified list
+                redis_client.hset(cart_key, product_id, json.dumps(variants))
+                return {"message": "Item variant removed from cart"}
         
-        existing_item.quantity = update_data.quantity
+        target_variant["quantity"] = update_data.quantity
     
-    # Handle source update if provided
+    # Handle source update
     if update_data.source is not None:
-        try:
-            # Validate source value against enum (if using enum)
-            # ProductSource(update_data.source)  # Uncomment if using enum validation
-            existing_item.source = update_data.source
-        except ValueError:
-            raise HTTPException(
-                status_code=400, 
-                detail="Invalid source value. Must be one of: Ex-china, Ex-india custom, doorstep delivery"
-            )
+        # No need for explicit validation here as Pydantic handles it via ProductSource enum
+        target_variant["source"] = update_data.source.value
+            
+    # Update the item list in Redis
+    redis_client.hset(cart_key, product_id, json.dumps(variants))
     
-    # Update the item in Redis
-    redis_client.hset(cart_key, product_id, existing_item.model_dump_json())
-    
+    # Return the updated variant details
+    updated_variant_details = CartItemDetails(**target_variant) # Convert back for response
+
     return {
-        "message": "Cart item updated",
+        "message": "Cart item variant updated",
         "product_id": product_id,
-        "details": existing_item
+        "details": updated_variant_details
     }
 
 @router.delete("/items/{product_id}")
 async def remove_from_cart(
     product_id: str,
-    x_user_id: str = Header(...)
+    x_user_id: str = Header(...),
+    variantIndex: Optional[int] = Query(None) # Add variantIndex as optional query param
 ):
-    """Remove an item from the cart"""
+    """Remove a specific item variant from the cart."""
     cart_key = get_cart_key(x_user_id)
-    if redis_client.hdel(cart_key, product_id):
-        return {"message": "Item removed from cart"}
-    raise HTTPException(status_code=404, detail="Item not found in cart")
+    existing_items_json = redis_client.hget(cart_key, product_id)
+
+    if not existing_items_json:
+        raise HTTPException(status_code=404, detail="Product not found in cart")
+
+    try:
+        variants = json.loads(existing_items_json)
+        if not isinstance(variants, list):
+            raise HTTPException(status_code=500, detail="Cart item data is corrupted")
+    except (json.JSONDecodeError, TypeError):
+         raise HTTPException(status_code=500, detail="Error reading cart item data")
+
+    # Find the specific variant to delete
+    variant_match_index = find_variant_index(variants, variantIndex)
+
+    if variant_match_index == -1:
+         raise HTTPException(status_code=404, detail="Specific variant not found in cart")
+
+    # Remove the variant from the list
+    variants.pop(variant_match_index)
+
+    # If the list is now empty, remove the product key from the cart hash
+    if not variants:
+        redis_client.hdel(cart_key, product_id)
+    else:
+        # Otherwise, update the list in Redis
+        redis_client.hset(cart_key, product_id, json.dumps(variants))
+
+    return {"message": "Item variant removed from cart"}
 
 @router.delete("/")
 async def clear_cart(x_user_id: str = Header(...)):
     """Clear all items from the cart"""
     cart_key = get_cart_key(x_user_id)
-    redis_client.delete(cart_key)
+    redis_client.delete(cart_key) # This remains the same, deletes the whole user cart hash
     return {"message": "Cart cleared"} 
