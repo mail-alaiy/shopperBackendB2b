@@ -75,11 +75,10 @@ async def create_order(
             raise HTTPException(status_code=cart_response.status_code, detail="Failed to fetch cart")
 
         cart_json = cart_response.json()
-
         cart_items = cart_json.get("items", {})
         if not cart_items:
             raise HTTPException(status_code=400, detail="Cart is empty")
-
+        
         product_ids = list(cart_items.keys())
 
         # Step 2: Fetch product details
@@ -111,13 +110,15 @@ async def create_order(
             sku_value = prod.get("skus", [])
             sku_retrieved = str(sku_value[0]) if isinstance(sku_value, list) and sku_value else ""
 
-            cart_item = cart_items.get(prod_id, {})
+            # 🛠️ FIX: Properly handle cart_items[prod_id] as a list
+            cart_item_list = cart_items.get(prod_id, [])
+            cart_item = cart_item_list[0] if isinstance(cart_item_list, list) and cart_item_list else {}
+
             quantity = max(1, int(cart_item.get("quantity", 1)))
             source = cart_item.get("source")
             sp = prod.get("sp", 0)
-            # Get appropriate price from variable pricing based on quantity
             price_to_use = sp
-            
+
             if 'variable_pricing' in prod and prod['variable_pricing']:
                 for price_tier in prod['variable_pricing']:
                     for range_str, price in price_tier.items():
@@ -133,7 +134,7 @@ async def create_order(
                             if min_qty <= quantity <= max_qty:
                                 price_to_use = price
                                 break
-            
+
             total_price += quantity * price_to_use
             order_details = OrderDetails(
                 sku=sku_retrieved,
@@ -142,10 +143,9 @@ async def create_order(
                 quantityShipped=quantity,
                 consumerPrice=price_to_use,
                 title=prod.get("name", ""),
-                source = source
+                source=source
             )
             order_details_list.append(order_details)
-            
 
         order = Order(
             currency=order_data.currency,
@@ -165,7 +165,7 @@ async def create_order(
             shippingState=order_data.shippingState,
             shippingPostalCode=order_data.shippingPostalCode,
             shippingCountry=order_data.shippingCountry,
-            total_amount = total_price
+            total_amount=total_price
         )
 
         order.save()
