@@ -147,116 +147,77 @@ async def add_to_cart(
 
     return {"message": "Item added/updated in cart", "product_id": product_id, "details": response_detail}
 
-# Define request model for PATCH including variantIndex
+# Define request model for PATCH - Only quantity can be updated
 class CartItemUpdateRequest(BaseModel):
-    quantity: Optional[int] = None
-    source: Optional[ProductSource] = None # Use the enum type
-    variantIndex: Optional[int] = None # Add variantIndex to specify which item
+    quantity: int # Required field for the update
 
 @router.patch("/items/{product_id}")
 async def update_cart_item(
     product_id: str,
-    update_data: CartItemUpdateRequest,
+    update_data: CartItemUpdateRequest, # Body now only contains quantity
+    variantIndex: int = Query(..., description="The variantIndex of the item to update"),
+    source: ProductSource = Query(..., description="The source of the item to update"),
     x_user_id: str = Depends(extract_user_id_from_event)
 ):
-    """Partially update a specific item variant in the cart."""
+    """
+    Update the quantity of a specific item variant in the cart.
+    The item is identified by product_id, variantIndex, and source via query parameters.
+    The request body must contain the new 'quantity'.
+    """
     cart_key = get_cart_key(x_user_id)
     existing_items_json = redis_client.hget(cart_key, product_id)
 
     if not existing_items_json:
-        raise HTTPException(status_code=404, detail="Product not found in cart")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found in cart")
 
     try:
         variants = json.loads(existing_items_json)
         if not isinstance(variants, list):
-             raise HTTPException(status_code=500, detail="Cart item data is corrupted")
+             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Cart item data is corrupted")
     except (json.JSONDecodeError, TypeError):
-        raise HTTPException(status_code=500, detail="Error reading cart item data")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error reading cart item data")
 
-    # Find the specific variant to update using only variantIndex for PATCH
-    # The logic for PATCH remains the same - it targets a specific entry potentially identified by variantIndex
-    variant_match_index = find_variant_index(variants, update_data.variantIndex) # Keep using the original find_variant_index here
+    # Find the specific variant to update using required variantIndex and source from query params
+    variant_match_index = find_variant_index_and_source(variants, variantIndex, source)
 
     if variant_match_index == -1:
-         raise HTTPException(status_code=404, detail="Specific variant not found in cart for update") # Clarified error
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Specific variant with index {variantIndex} and source '{source.value}' not found in cart for this product")
 
     target_variant = variants[variant_match_index]
 
-    # Handle quantity update
-    if update_data.quantity is not None:
-        if update_data.quantity < 0:
-            raise HTTPException(status_code=400, detail="Quantity cannot be negative")
-        
-        if update_data.quantity == 0:
-            # Remove this specific variant from the list
-            variants.pop(variant_match_index)
-            # If list is now empty, remove the product from the cart hash
-            if not variants:
-                redis_client.hdel(cart_key, product_id)
-                return {"message": "Item variant removed from cart"}
-            else:
-                # Update redis with the modified list
-                redis_client.hset(cart_key, product_id, json.dumps(variants))
-                return {"message": "Item variant removed from cart"}
-        
-        target_variant["quantity"] = update_data.quantity
-    
-    # Handle source update
-    if update_data.source is not None:
-        # Check if changing the source would create a duplicate (same variantIndex, new source)
-        # that already exists in the list (excluding the current item being updated)
-        temp_list_without_current = [item for i, item in enumerate(variants) if i != variant_match_index]
-        potential_duplicate_index = find_variant_index_and_source(
-            temp_list_without_current,
-            target_variant.get("variantIndex"), # Use existing variantIndex
-            update_data.source # Use the new source
-        )
+    # --- Handle Quantity Update ---
+    new_quantity = update_data.quantity
+    if new_quantity < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity cannot be negative")
 
-        if potential_duplicate_index != -1:
-            # Instead of updating source, merge quantities
-            existing_duplicate = temp_list_without_current[potential_duplicate_index]
-            new_quantity = existing_duplicate["quantity"] + target_variant["quantity"] # Combine quantities
-
-            # Remove the original item being 'updated'
-            variants.pop(variant_match_index)
-
-            # Find the index of the duplicate in the *original* list to update its quantity
-            original_duplicate_index = find_variant_index_and_source(
-                variants, # Search the now modified list (original item removed)
-                target_variant.get("variantIndex"),
-                update_data.source
-            )
-            if original_duplicate_index != -1: # Should always find it now
-                 variants[original_duplicate_index]["quantity"] = new_quantity
-            else:
-                 # This case should theoretically not happen after the merge logic
-                 # But as a fallback, maybe add it back? Or raise error.
-                 # For now, let's just proceed (Redis update happens below)
-                 pass
-
-            # Update Redis with the merged list
-            redis_client.hset(cart_key, product_id, json.dumps(variants))
-
-            # Find the merged item details for response
-            merged_details = next((v for v in variants if find_variant_index_and_source([v], target_variant.get("variantIndex"), update_data.source) != -1), None)
-
-            return {
-                "message": "Cart item source updated by merging quantities with existing variant",
-                "product_id": product_id,
-                "details": merged_details
-            }
+    if new_quantity == 0:
+        # Remove this specific variant from the list
+        variants.pop(variant_match_index)
+        message = f"Item variant (index: {variantIndex}, source: {source.value}) removed via zero quantity update"
+        # If list is now empty, remove the product from the cart hash
+        if not variants:
+            redis_client.hdel(cart_key, product_id)
+            # Return immediately after deleting the hash key
+            return {"message": message}
         else:
-             # No duplicate would be created, so just update the source
-             target_variant["source"] = update_data.source.value
-            
-    # Update the item list in Redis (if not merged)
+            # Update redis with the modified list (item removed)
+            redis_client.hset(cart_key, product_id, json.dumps(variants))
+            # Return immediately after updating the list
+            return {"message": message}
+
+    # Update the quantity for the target variant
+    target_variant["quantity"] = new_quantity
+
+    # --- Source update logic is removed ---
+
+    # Update the item list in Redis with the new quantity
     redis_client.hset(cart_key, product_id, json.dumps(variants))
-    
+
     # Return the updated variant details
-    updated_variant_details = CartItemDetails(**target_variant) # Convert back for response
+    updated_variant_details = CartItemDetails(**target_variant)
 
     return {
-        "message": "Cart item variant updated",
+        "message": "Cart item quantity updated",
         "product_id": product_id,
         "details": updated_variant_details
     }
@@ -265,47 +226,38 @@ async def update_cart_item(
 async def remove_from_cart(
     product_id: str,
     x_user_id: str = Depends(extract_user_id_from_event),
-    variantIndex: Optional[int] = Query(None), # Add variantIndex as optional query param
-    source: Optional[ProductSource] = Query(None) # Add source as optional query param to specify which one to delete
+    variantIndex: int = Query(..., description="The variantIndex of the item to remove."), # Now required
+    source: ProductSource = Query(..., description="The source of the item to remove.") # Now required
 ):
-    """Remove a specific item variant (specified by variantIndex and source) from the cart."""
+    """
+    Remove a specific item variant from the cart.
+    Requires both 'variantIndex' and 'source' query parameters to identify the exact item.
+    """
     cart_key = get_cart_key(x_user_id)
     existing_items_json = redis_client.hget(cart_key, product_id)
 
     if not existing_items_json:
-        raise HTTPException(status_code=404, detail="Product not found in cart")
+        # Use standard 404
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found in cart")
 
     try:
         variants = json.loads(existing_items_json)
         if not isinstance(variants, list):
-            raise HTTPException(status_code=500, detail="Cart item data is corrupted")
+            # Use standard 500 for server-side data issues
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Cart item data is corrupted")
     except (json.JSONDecodeError, TypeError):
-         raise HTTPException(status_code=500, detail="Error reading cart item data")
+         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error reading cart item data")
 
-    # Find the specific variant to delete using index and source
-    # If source is not provided, fallback to original behavior (just index) for backward compatibility?
-    # Or require both? Let's require source if index is provided.
-    variant_match_index = -1
-    if source is not None:
-        variant_match_index = find_variant_index_and_source(variants, variantIndex, source)
-    elif variantIndex is not None: # If only variantIndex provided, find first match (ambiguous if sources differ)
-        variant_match_index = find_variant_index(variants, variantIndex)
-        if variant_match_index != -1:
-             # Check if there are multiple variants with the same index but different sources
-             count = sum(1 for item in variants if item.get("variantIndex") == variantIndex)
-             if count > 1:
-                 raise HTTPException(status_code=400, detail=f"Multiple variants exist for index {variantIndex}. Please specify 'source' to remove a specific one.")
-    else:
-        # Neither index nor source provided - ambiguous, maybe delete all for the product?
-        # Current behavior implicitly expects at least product_id. Let's require index or source.
-         raise HTTPException(status_code=400, detail="Either 'variantIndex' or 'source' (or both) must be provided to identify the item to remove.")
+    # Find the specific variant to delete using the required index and source
+    variant_match_index = find_variant_index_and_source(variants, variantIndex, source)
 
-
+    # Check if the specific variant was found
     if variant_match_index == -1:
-         raise HTTPException(status_code=404, detail="Specific variant not found in cart based on provided criteria")
+         # Use standard 404
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Specific variant with index {variantIndex} and source '{source.value}' not found in cart for this product")
 
     # Remove the variant from the list
-    variants.pop(variant_match_index)
+    deleted_item_details = variants.pop(variant_match_index)
 
     # If the list is now empty, remove the product key from the cart hash
     if not variants:
@@ -314,7 +266,11 @@ async def remove_from_cart(
         # Otherwise, update the list in Redis
         redis_client.hset(cart_key, product_id, json.dumps(variants))
 
-    return {"message": "Item variant removed from cart"}
+    # Return a confirmation message, optionally including details of the removed item
+    return {
+        "message": "Item variant removed from cart",
+        "removed_item": CartItemDetails(**deleted_item_details).model_dump()
+    }
 
 @router.delete("/")
 async def clear_cart(x_user_id: str = Depends(extract_user_id_from_event)):

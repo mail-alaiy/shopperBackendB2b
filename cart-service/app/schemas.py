@@ -18,4 +18,9 @@ class AddCartItemRequest(BaseModel):
     variantIndex: Optional[int] = None
 
 class CartResponse(BaseModel):
-    items: Dict[str, List[CartItemDetails]] 
+    items: Dict[str, List[CartItemDetails]]
+
+# Define request model for PATCH including variantIndex
+class CartItemUpdateRequest(BaseModel):
+    quantity: Optional[int] = None
+    source: Optional[ProductSource] = None # Optional: Only include if changing the source 
