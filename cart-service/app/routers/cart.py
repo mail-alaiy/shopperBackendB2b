@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Header, Request, Query
+from fastapi import APIRouter, HTTPException, Depends, Header, Request, Query, status
 from typing import Dict, Optional, List
 import redis
 import json
@@ -8,13 +8,23 @@ from pydantic import BaseModel, ValidationError
 import os
 
 load_dotenv()
-router = APIRouter()
+router = APIRouter(prefix="/cart")
 
 # Redis connection
 
 REDIS_HOST = os.getenv("REDIS_HOST")
 print(REDIS_HOST)
 redis_client = redis.Redis(host="redis-62ad01f163fa3b2a.elb.ap-southeast-2.amazonaws.com", port=6379, db=0, decode_responses=True)
+
+def extract_user_id_from_event(request: Request) -> str:
+    event = request.scope.get("aws.event", {})
+    authorizer = event.get("requestContext", {}).get("authorizer", {})
+
+    user_id = authorizer.get("userId")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing userId in requestContext.authorizer")
+
+    return user_id
 
 def get_cart_key(user_id: str) -> str:
     return f"cart:{user_id}"
@@ -44,7 +54,7 @@ async def debug_headers(request: Request):
     return dict(request.headers)
 
 @router.get("/", response_model=CartResponse)
-async def get_cart(x_user_id: str = Header(...)):
+async def get_cart(x_user_id: str = Depends(extract_user_id_from_event)):
     """Get the contents of a user's cart, supporting variants."""
     cart_key = get_cart_key(x_user_id)
     cart_data_raw = redis_client.hgetall(cart_key)
@@ -84,7 +94,7 @@ async def get_cart(x_user_id: str = Header(...)):
 async def add_to_cart(
     product_id: str,
     item_data: AddCartItemRequest,
-    x_user_id: str = Header(...)
+    x_user_id: str = Depends(extract_user_id_from_event)
 ):
     """Add an item/variant to the cart or update quantity if source and variantIndex match."""
     cart_key = get_cart_key(x_user_id)
@@ -146,7 +156,7 @@ class CartItemUpdateRequest(BaseModel):
 async def update_cart_item(
     product_id: str,
     update_data: CartItemUpdateRequest,
-    x_user_id: str = Header(...)
+    x_user_id: str = Depends(extract_user_id_from_event)
 ):
     """Partially update a specific item variant in the cart."""
     cart_key = get_cart_key(x_user_id)
@@ -209,7 +219,7 @@ async def update_cart_item(
 @router.delete("/items/{product_id}")
 async def remove_from_cart(
     product_id: str,
-    x_user_id: str = Header(...),
+    x_user_id: str = Depends(extract_user_id_from_event),
     variantIndex: Optional[int] = Query(None) # Add variantIndex as optional query param
 ):
     """Remove a specific item variant from the cart."""
@@ -245,7 +255,7 @@ async def remove_from_cart(
     return {"message": "Item variant removed from cart"}
 
 @router.delete("/")
-async def clear_cart(x_user_id: str = Header(...)):
+async def clear_cart(x_user_id: str = Depends(extract_user_id_from_event)):
     """Clear all items from the cart"""
     cart_key = get_cart_key(x_user_id)
     redis_client.delete(cart_key) # This remains the same, deletes the whole user cart hash

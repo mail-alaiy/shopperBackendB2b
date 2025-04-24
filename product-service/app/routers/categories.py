@@ -12,7 +12,7 @@ ALGOLIA_APP_ID = os.getenv("ALGOLIA_ID")
 ALGOLIA_API_KEY = os.getenv("ALGOLIA_ADMIN_KEY")
 INDEX_NAME = "product_index"
 
-router = APIRouter()
+router = APIRouter(prefix="/products")
     
 @router.get("/categories")
 def get_categories():

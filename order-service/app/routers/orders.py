@@ -1,34 +1,32 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Path, Body
+from fastapi import APIRouter, Depends, HTTPException, Header, Path, Body, status, Request
 from mongoengine.errors import ValidationError as MongoValidationError
 from bson import json_util
 import json
 from bson.objectid import ObjectId
 import requests
 from jose import jwt, JWTError
-import app.database
 from app.models import Order, OrderDetails
 from datetime import datetime
 import os
 from app.schema import CreateOrderRequest
-router = APIRouter()
+router = APIRouter(prefix="/orders")
 CART_URL = os.getenv("CART_URL")
 PRODUCT_URL = os.getenv("PRODUCT_URL")
 ORDER_UPDATE_TOKEN = os.getenv("ACCESS_TOKEN_SECRET_UPDATE")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
+
+def extract_user_id_from_event(request: Request) -> str:
+    event = request.scope.get("aws.event", {})
+    authorizer = event.get("requestContext", {}).get("authorizer", {})
+
+    user_id = authorizer.get("userId")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing userId in requestContext.authorizer")
+
+    return user_id
+
 @router.get("/")
-async def get_orders(x_user_id: str = Header(...)):
-    """
-    Retrieve all orders belonging to the authenticated user.
-
-    Args:
-        x_user_id: The ID of the user making the request, extracted from the header.
-
-    Returns:
-        A list of orders for the user or a message indicating no orders were found.
-
-    Raises:
-        HTTPException: If there's an internal server error.
-    """
+async def get_orders(x_user_id: str = Depends(extract_user_id_from_event)):
     try:
         # MongoEngine query using the Order model
         orders = Order.objects(merchantId=x_user_id)
@@ -49,19 +47,7 @@ async def get_orders(x_user_id: str = Header(...)):
 
 
 @router.delete("/")
-async def delete_orders(x_user_id: str = Header(...)):
-    """
-    Delete all orders associated with the authenticated user.
-
-    Args:
-        x_user_id: The ID of the user making the request, extracted from the header.
-
-    Returns:
-        A confirmation message with the count of deleted orders.
-
-    Raises:
-        HTTPException: If there's an internal server error during deletion.
-    """
+async def delete_orders(x_user_id: str = Depends(extract_user_id_from_event)):
     try:
         deleted_count = Order.objects(merchantId=x_user_id).delete()
         
@@ -78,24 +64,9 @@ async def delete_orders(x_user_id: str = Header(...)):
 @router.post("/")
 async def create_order(
     order_data: CreateOrderRequest,
-    x_user_id: str = Header(...),
+    x_user_id: str = Depends(extract_user_id_from_event),
     authorization: str = Header(None)
 ):
-    """
-    Create a new order based on the user's current cart and provided shipping details.
-
-    Args:
-        order_data: Pydantic model containing shipping and order details.
-        x_user_id: The ID of the user creating the order, from the header.
-        authorization: The user's authorization token, from the header.
-
-    Returns:
-        The newly created order details.
-
-    Raises:
-        HTTPException: If fetching cart or product details fails, the cart is empty,
-                       or any other internal error occurs.
-    """
     try:
         headers = {"Authorization": authorization}
         cart_response = requests.get(f"{CART_URL}/", headers=headers)
@@ -208,21 +179,7 @@ async def create_order(
 
 
 @router.get("/order/{order_id}")
-async def get_order_by_id(order_id: str, x_user_id: str = Header(...)):
-    """
-    Retrieve a specific order by its ID, ensuring it belongs to the authenticated user.
-
-    Args:
-        order_id: The MongoDB ObjectId of the order to retrieve.
-        x_user_id: The ID of the user making the request, from the header.
-
-    Returns:
-        The requested order details if found and authorized.
-
-    Raises:
-        HTTPException: If the order ID is invalid, the order is not found,
-                       the user is not authorized, or an internal error occurs.
-    """
+async def get_order_by_id(order_id: str, x_user_id: str = Depends(extract_user_id_from_event)):
     try:
         if not ObjectId.is_valid(order_id):
             raise HTTPException(status_code=400, detail="Invalid order ID")
@@ -242,22 +199,7 @@ async def get_order_by_id(order_id: str, x_user_id: str = Header(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.patch("/order/{order_id}")
-async def update_order_by_id(order_id: str, update_data: dict = Body(...), x_user_id: str = Header(...)):
-    """
-    Update specific fields of an order by its ID.
-
-    Args:
-        order_id: The MongoDB ObjectId of the order to update.
-        update_data: A dictionary containing the fields and values to update.
-        x_user_id: The ID of the user making the request, from the header.
-
-    Returns:
-        A confirmation message with the order ID and updated fields.
-
-    Raises:
-        HTTPException: If the order ID is invalid, the order is not found,
-                       the user is not authorized, validation fails, or an internal error occurs.
-    """
+async def update_order_by_id(order_id: str, update_data: dict = Body(...), x_user_id: str = Depends(extract_user_id_from_event)):
     try:
         if not ObjectId.is_valid(order_id):
             raise HTTPException(status_code=400, detail="Invalid order ID")
@@ -284,21 +226,7 @@ async def update_order_by_id(order_id: str, update_data: dict = Body(...), x_use
         raise HTTPException(status_code=500, detail=str(e))
     
 @router.delete("/order/{order_id}")
-async def delete_order_by_id(order_id: str, x_user_id: str = Header(...)):
-    """
-    Delete a specific order by its ID.
-
-    Args:
-        order_id: The MongoDB ObjectId of the order to delete.
-        x_user_id: The ID of the user making the request, from the header.
-
-    Returns:
-        A confirmation message indicating successful deletion.
-
-    Raises:
-        HTTPException: If the order ID is invalid, the order is not found,
-                       the user is not authorized, or an internal error occurs.
-    """
+async def delete_order_by_id(order_id: str, x_user_id: str = Depends(extract_user_id_from_event)):
     try:
         if not ObjectId.is_valid(order_id):
             raise HTTPException(status_code=400, detail="Invalid order ID")
@@ -322,21 +250,6 @@ async def delete_order_by_id(order_id: str, x_user_id: str = Header(...)):
 async def update_payment_status(
     body: dict = Body(...)
 ):
-    """
-    Update the payment status of a specific order to 'Paid'.
-
-    Args:
-        order_id: The MongoDB ObjectId of the order to update.
-        x_user_id: The ID of the user making the request, from the header.
-        authorization: User's authorization token (currently unused but kept for consistency).
-
-    Returns:
-        The updated order details with the new payment status.
-
-    Raises:
-        HTTPException: If the order ID is invalid, the order is not found,
-                       the user is not authorized, or an internal error occurs.
-    """
     try:
         token = body.get("token")
 
@@ -378,18 +291,6 @@ async def update_payment_status(
 
 @router.get("/admin/orders/{user_id}")
 async def admin_get_orders(user_id: str):
-    """
-    Admin route to retrieve all orders for a specific user ID.
-
-    Args:
-        user_id: The ID of the user whose orders are to be retrieved.
-
-    Returns:
-        A list of orders for the specified user or a message indicating no orders found.
-
-    Raises:
-        HTTPException: If there's an internal server error.
-    """
     try:
         # MongoEngine query using the Order model
         orders = Order.objects(merchantId=user_id)
@@ -410,19 +311,6 @@ async def admin_get_orders(user_id: str):
 
 @router.get("/admin/order/{order_id}")
 async def admin_get_order_by_id(order_id: str = Path(..., description="MongoDB Order ID to fetch")):
-    """
-    Admin route to fetch a specific order by its ID, without user ID check.
-
-    Args:
-        order_id: The MongoDB ObjectId of the order to fetch.
-
-    Returns:
-        The requested order details if found.
-
-    Raises:
-        HTTPException: If the order ID is invalid, the order is not found,
-                       or any other internal error occurs.
-    """
     try:
         if not ObjectId.is_valid(order_id):
             raise HTTPException(status_code=400, detail="Invalid order ID format")

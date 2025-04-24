@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import cart
-
+from app.routers import health_check
+from mangum import Mangum
 app = FastAPI(title="Cart Service")
 
 # Configure CORS
@@ -15,7 +16,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(cart.router)
+app.include_router(health_check.router)
 
-@app.get("/health-check")
-def read_root():
-    return {"message": "Cart Service is running"} 
+
+handler = Mangum(app)

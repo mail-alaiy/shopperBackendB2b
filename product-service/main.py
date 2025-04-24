@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import products
 from app.routers import categories
+from app.routers import health_check
 from mangum import Mangum
 app = FastAPI(title="Product Service")
 
@@ -15,9 +16,6 @@ app.add_middleware(
 
 app.include_router(products.router)
 app.include_router(categories.router)
-
-@app.get("/health-check")
-def read_root():
-    return {"message": "Product Service is running"}
+app.include_router(health_check.router)
 
 handler = Mangum(app)
