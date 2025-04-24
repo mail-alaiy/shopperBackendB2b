@@ -26,6 +26,14 @@ def find_variant_index(items: List[Dict], variant_index: Optional[int]) -> int:
             return i
     return -1
 
+# Helper function to find a variant in a list by index AND source
+def find_variant_index_and_source(items: List[Dict], variant_index: Optional[int], source: ProductSource) -> int:
+    for i, item in enumerate(items):
+        # Check both variantIndex and source match
+        if item.get("variantIndex") == variant_index and item.get("source") == source.value:
+            return i
+    return -1
+
 # Helper function to parse cart items from Redis
 def parse_cart_items(items_json_list: List[str]) -> List[CartItemDetails]:
     parsed_items = []
@@ -86,53 +94,46 @@ async def add_to_cart(
     item_data: AddCartItemRequest,
     x_user_id: str = Header(...)
 ):
-    """Add an item/variant to the cart or update quantity if source and variantIndex match."""
+    """Add an item/variant to the cart. If item with same variantIndex and source exists, update quantity. Otherwise, add as a new entry."""
     cart_key = get_cart_key(x_user_id)
     
-    # Get current list of variants for the product, if any
     existing_items_json = redis_client.hget(cart_key, product_id)
-    variants: List[Dict] = [] # Store as list of dicts before saving
+    variants: List[Dict] = [] 
     if existing_items_json:
         try:
             variants = json.loads(existing_items_json)
-            if not isinstance(variants, list): # Ensure it's a list
-                variants = [] # Reset if data is corrupt
+            if not isinstance(variants, list): 
+                variants = [] 
         except json.JSONDecodeError:
-            variants = [] # Reset if data is corrupt
+            variants = [] 
             
-    # Find if the specific variant (matched by variantIndex) already exists
-    variant_match_index = find_variant_index(variants, item_data.variantIndex)
+    # Find if the specific variant (matched by variantIndex AND source) already exists
+    # Use the new helper function
+    exact_match_index = find_variant_index_and_source(variants, item_data.variantIndex, item_data.source)
 
-    updated = False
-    if variant_match_index != -1:
-        # Variant exists, check source
-        existing_variant = variants[variant_match_index]
-        if existing_variant.get("source") == item_data.source.value:
-            # Source matches, update quantity
-            existing_variant["quantity"] += item_data.quantity
-            updated = True
-        else:
-            # Source differs, overwrite the variant (as per original logic)
-            variants[variant_match_index] = {
-                "quantity": item_data.quantity,
-                "source": item_data.source.value,
-                "variantIndex": item_data.variantIndex
-            }
-            updated = True
-    
-    if not updated:
-         # Variant doesn't exist or source differed, add as new variant
+    if exact_match_index != -1:
+        # Exact match found (same product, variantIndex, and source), update quantity
+        variants[exact_match_index]["quantity"] += item_data.quantity
+    else:
+         # No exact match found, add as a new variant entry
         variants.append({
             "quantity": item_data.quantity,
             "source": item_data.source.value,
             "variantIndex": item_data.variantIndex
         })
 
-    # Store the updated list of variants as a JSON string
     redis_client.hset(cart_key, product_id, json.dumps(variants))
 
-    # Prepare response detail matching the added/updated item structure
-    response_detail = next((v for i, v in enumerate(variants) if find_variant_index([v], item_data.variantIndex) != -1), None)
+    # Find the specific item added/updated for the response
+    response_detail = None
+    if exact_match_index != -1:
+        response_detail = variants[exact_match_index]
+    else:
+        # Find the newly added item (it will be the last one with matching variantIndex and source)
+         for variant in reversed(variants):
+             if variant.get("variantIndex") == item_data.variantIndex and variant.get("source") == item_data.source.value:
+                 response_detail = variant
+                 break
 
     return {"message": "Item added/updated in cart", "product_id": product_id, "details": response_detail}
 
@@ -162,11 +163,12 @@ async def update_cart_item(
     except (json.JSONDecodeError, TypeError):
         raise HTTPException(status_code=500, detail="Error reading cart item data")
 
-    # Find the specific variant to update
-    variant_match_index = find_variant_index(variants, update_data.variantIndex)
+    # Find the specific variant to update using only variantIndex for PATCH
+    # The logic for PATCH remains the same - it targets a specific entry potentially identified by variantIndex
+    variant_match_index = find_variant_index(variants, update_data.variantIndex) # Keep using the original find_variant_index here
 
     if variant_match_index == -1:
-         raise HTTPException(status_code=404, detail="Specific variant not found in cart")
+         raise HTTPException(status_code=404, detail="Specific variant not found in cart for update") # Clarified error
 
     target_variant = variants[variant_match_index]
 
@@ -191,10 +193,53 @@ async def update_cart_item(
     
     # Handle source update
     if update_data.source is not None:
-        # No need for explicit validation here as Pydantic handles it via ProductSource enum
-        target_variant["source"] = update_data.source.value
+        # Check if changing the source would create a duplicate (same variantIndex, new source)
+        # that already exists in the list (excluding the current item being updated)
+        temp_list_without_current = [item for i, item in enumerate(variants) if i != variant_match_index]
+        potential_duplicate_index = find_variant_index_and_source(
+            temp_list_without_current,
+            target_variant.get("variantIndex"), # Use existing variantIndex
+            update_data.source # Use the new source
+        )
+
+        if potential_duplicate_index != -1:
+            # Instead of updating source, merge quantities
+            existing_duplicate = temp_list_without_current[potential_duplicate_index]
+            new_quantity = existing_duplicate["quantity"] + target_variant["quantity"] # Combine quantities
+
+            # Remove the original item being 'updated'
+            variants.pop(variant_match_index)
+
+            # Find the index of the duplicate in the *original* list to update its quantity
+            original_duplicate_index = find_variant_index_and_source(
+                variants, # Search the now modified list (original item removed)
+                target_variant.get("variantIndex"),
+                update_data.source
+            )
+            if original_duplicate_index != -1: # Should always find it now
+                 variants[original_duplicate_index]["quantity"] = new_quantity
+            else:
+                 # This case should theoretically not happen after the merge logic
+                 # But as a fallback, maybe add it back? Or raise error.
+                 # For now, let's just proceed (Redis update happens below)
+                 pass
+
+            # Update Redis with the merged list
+            redis_client.hset(cart_key, product_id, json.dumps(variants))
+
+            # Find the merged item details for response
+            merged_details = next((v for v in variants if find_variant_index_and_source([v], target_variant.get("variantIndex"), update_data.source) != -1), None)
+
+            return {
+                "message": "Cart item source updated by merging quantities with existing variant",
+                "product_id": product_id,
+                "details": merged_details
+            }
+        else:
+             # No duplicate would be created, so just update the source
+             target_variant["source"] = update_data.source.value
             
-    # Update the item list in Redis
+    # Update the item list in Redis (if not merged)
     redis_client.hset(cart_key, product_id, json.dumps(variants))
     
     # Return the updated variant details
@@ -210,9 +255,10 @@ async def update_cart_item(
 async def remove_from_cart(
     product_id: str,
     x_user_id: str = Header(...),
-    variantIndex: Optional[int] = Query(None) # Add variantIndex as optional query param
+    variantIndex: Optional[int] = Query(None), # Add variantIndex as optional query param
+    source: Optional[ProductSource] = Query(None) # Add source as optional query param to specify which one to delete
 ):
-    """Remove a specific item variant from the cart."""
+    """Remove a specific item variant (specified by variantIndex and source) from the cart."""
     cart_key = get_cart_key(x_user_id)
     existing_items_json = redis_client.hget(cart_key, product_id)
 
@@ -226,11 +272,27 @@ async def remove_from_cart(
     except (json.JSONDecodeError, TypeError):
          raise HTTPException(status_code=500, detail="Error reading cart item data")
 
-    # Find the specific variant to delete
-    variant_match_index = find_variant_index(variants, variantIndex)
+    # Find the specific variant to delete using index and source
+    # If source is not provided, fallback to original behavior (just index) for backward compatibility?
+    # Or require both? Let's require source if index is provided.
+    variant_match_index = -1
+    if source is not None:
+        variant_match_index = find_variant_index_and_source(variants, variantIndex, source)
+    elif variantIndex is not None: # If only variantIndex provided, find first match (ambiguous if sources differ)
+        variant_match_index = find_variant_index(variants, variantIndex)
+        if variant_match_index != -1:
+             # Check if there are multiple variants with the same index but different sources
+             count = sum(1 for item in variants if item.get("variantIndex") == variantIndex)
+             if count > 1:
+                 raise HTTPException(status_code=400, detail=f"Multiple variants exist for index {variantIndex}. Please specify 'source' to remove a specific one.")
+    else:
+        # Neither index nor source provided - ambiguous, maybe delete all for the product?
+        # Current behavior implicitly expects at least product_id. Let's require index or source.
+         raise HTTPException(status_code=400, detail="Either 'variantIndex' or 'source' (or both) must be provided to identify the item to remove.")
+
 
     if variant_match_index == -1:
-         raise HTTPException(status_code=404, detail="Specific variant not found in cart")
+         raise HTTPException(status_code=404, detail="Specific variant not found in cart based on provided criteria")
 
     # Remove the variant from the list
     variants.pop(variant_match_index)
