@@ -19,7 +19,7 @@ app.add_middleware(
 
 app.include_router(user.router)
 
-@app.get("/")
+@app.get("")
 def read_root():
     return {"message": "User Service is running"}
 

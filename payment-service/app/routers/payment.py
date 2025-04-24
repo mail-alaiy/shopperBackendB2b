@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 import requests
 from app.helpers import payment_utils, email_helper
 import json
@@ -12,38 +12,31 @@ import os
 from requests.exceptions import RequestException
 from dotenv import load_dotenv
 load_dotenv()
-router = APIRouter()
+router = APIRouter(prefix="/payments")
 
 SECRET_KEY = os.getenv("ACCESS_TOKEN_SECRET_UPDATE")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
 ORDER_UPDATE_URL = os.getenv("ORDER_UPDATE_URL")
 
 
-def extract_user_id_from_token(auth_header: str):
-    try:
-        scheme, token = auth_header.strip().split()
-        if scheme.lower() != "bearer":
-            raise HTTPException(status_code=401, detail="Invalid token scheme")
+def extract_user_id_from_event(request: Request) -> str:
+    event = request.scope.get("aws.event", {})
+    authorizer = event.get("requestContext", {}).get("authorizer", {})
 
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
-        user_id = payload.get("id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Missing user ID in token")
+    user_id = authorizer.get("userId")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing userId in requestContext.authorizer")
 
-        return user_id
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Malformed authorization header")
+    return user_id
 
 
 @router.get("/pay/{order_id}")
 async def initiate_payment_for_order(
     order_id: str,
-    authorization: str = Header(...)
+    authorization: str = Header(...),
+    x_user_id: str = Depends(extract_user_id_from_event)
 ):
     try:
-        x_user_id = extract_user_id_from_token(authorization)
         print(f"[LOG] Initiating payment for order_id: {order_id}, user_id: {x_user_id}")
 
         # Step 1: Fetch required data

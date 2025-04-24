@@ -4,12 +4,14 @@ from app import models, schemas, auth
 from app.database import SessionLocal
 from jose import JWTError
 from typing import List
+from dotenv import load_dotenv
 from uuid import UUID
 from app.helpers.email_utils import send_verification_email, send_confirmation_email, SENDER_EMAIL
 from datetime import datetime, timezone
 import resend # Import resend library
 import os # Import os to access environment variables
 
+load_dotenv()
 # Dependency: Get DB session
 def get_db():
     """Dependency that provides a SQLAlchemy database session."""
@@ -118,7 +120,7 @@ def signup(data: schemas.UserCreate, request: Request, db: Session = Depends(get
     db.commit()
     db.refresh(new_user)
     db.refresh(verification_token) # Ensure token value is loaded
-
+    STAGE = os.getenv("STAGE_NAME")
     # Construct verification link pointing to the frontend
     if FRONTEND_VERIFICATION_URL:
         # Append token as a query parameter
@@ -128,7 +130,7 @@ def signup(data: schemas.UserCreate, request: Request, db: Session = Depends(get
         # Fallback: If frontend URL isn't set, log error and maybe don't send email or send backend link with warning
         # Sending backend link directly as a fallback (less ideal)
         base_url = str(request.base_url).rstrip('/')
-        verification_link = f"{base_url}/verify-email/{verification_token.token}"
+        verification_link = f"{base_url}/{STAGE}/verify-email/{verification_token.token}"
         print(f"CRITICAL WARNING: FRONTEND_VERIFICATION_URL not set. Falling back to direct backend link: {verification_link}")
         # Consider raising an internal server error if frontend URL is essential
         # raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server configuration error: Frontend verification URL not set.")

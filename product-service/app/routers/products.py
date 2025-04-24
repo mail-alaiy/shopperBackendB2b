@@ -13,9 +13,9 @@ ALGOLIA_APP_ID = os.getenv("ALGOLIA_ID")
 ALGOLIA_API_KEY = os.getenv("ALGOLIA_ADMIN_KEY")
 INDEX_NAME = "product_index"
 
-router = APIRouter()
+router = APIRouter(prefix="/products")
 
-@router.get("/")
+@router.get("")
 def get_products(query: str = Query(""),limit: int = Query(10), page: int = Query(1)):
     url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{INDEX_NAME}/query"
     headers = {
