@@ -1,22 +1,14 @@
-FROM python:3.11
+# Use AWS Lambda's base image for Python 3.11
+FROM public.ecr.aws/lambda/python:3.11
 
-WORKDIR /app
-
-# Copy requirements first to leverage Docker cache
-COPY ./requirements.txt .
-
-# Install dependencies
+# Copy dependencies and install them
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the main application entrypoint and the app directory
-COPY ./main.py ./
+# Copy application files
 COPY ./app ./app
+COPY main.py .
+COPY .env .
 
-# .env file is handled by docker-compose environment/env_file, no need to copy here
-COPY ./.env .
-
-# Expose the port the app runs on
-EXPOSE 80
-
-# Command to run the application using the main app object
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"] 
+# Lambda will now correctly find this
+CMD ["main.handler"]
