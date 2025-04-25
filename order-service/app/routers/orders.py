@@ -5,6 +5,7 @@ import json
 from bson.objectid import ObjectId
 import requests
 from jose import jwt, JWTError
+from app.helpers import email_helper
 from app.models import Order, OrderDetails
 from datetime import datetime
 import os
@@ -12,6 +13,7 @@ from app.schema import CreateOrderRequest
 router = APIRouter(prefix="/orders")
 CART_URL = os.getenv("CART_URL")
 PRODUCT_URL = os.getenv("PRODUCT_URL")
+USER_URL = os.getenv("USER_URL")
 ORDER_UPDATE_TOKEN = os.getenv("ACCESS_TOKEN_SECRET_UPDATE")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
 
@@ -263,6 +265,7 @@ async def update_payment_status(
             raise HTTPException(status_code=401, detail="Invalid or expired token")
 
         order_id = decoded.get("order_id")
+        email_id = decoded.get("user_email")
 
         if not order_id or not ObjectId.is_valid(order_id):
             raise HTTPException(status_code=400, detail="Invalid or missing order ID in token")

@@ -198,34 +198,10 @@ async def phonepe_webhook(request: Request):
                     else:
                          print(f"[LOG] Payment status already '{payment.status}'. No DB update needed.")
 
-
+                    user_email = ""
                     # --- Order Update and Email Sending (only on first success) ---
                     if is_successful_payment and payment.status == "SUCCESS": # Check *our* determined SUCCESS status
                         print(f"[LOG] Processing successful payment actions for {merchant_transaction_id}")
-
-                        # 1. Update Order Service (Assuming this should only happen once)
-                        # Check if order update was already attempted/successful if needed
-                        try:
-                            payload = {"order_id": payment.orderId}
-                            print(f"[LOG] Encoding JWT token for order update with payload: {payload}")
-                            token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
-                            print(f"[LOG] Sending PUT request to ORDER_UPDATE_URL: {ORDER_UPDATE_URL}")
-                            response = requests.put(ORDER_UPDATE_URL, json={"token": token}, timeout=10) # Added timeout
-                            response.raise_for_status()
-                            print(f"[LOG] Order update request successful: {response.status_code}")
-                        except jwt.JWTError as jwt_err:
-                            print(f"[ERROR] JWT encoding failed for order update: {jwt_err}")
-                            # Decide if this should block email or just log
-                        except RequestException as put_error:
-                            print(f"[ERROR] Failed to send PUT request to order update URL.")
-                            print(f"[ERROR] Details: {put_error}")
-                            # Log error, but proceed to email attempt
-                            # Consider adding retry logic or background task for order update failures
-                        except Exception as order_update_err:
-                            print(f"[ERROR] Unexpected error during order update: {order_update_err}")
-                            print(traceback.format_exc())
-
-
                         # 2. Send Confirmation Email
                         if user_id_for_email:
                             print(f"[LOG] Attempting to send confirmation email for user: {user_id_for_email}")
@@ -252,6 +228,27 @@ async def phonepe_webhook(request: Request):
                              print("[WARN] User ID not found in payment record. Cannot fetch email.")
 
                     # --- End Successful Payment Actions ---
+                        # 1. Update Order Service (Assuming this should only happen once)
+                        # Check if order update was already attempted/successful if needed
+                        try:
+                            payload = {"order_id": payment.orderId, "user_email": user_email}
+                            print(f"[LOG] Encoding JWT token for order update with payload: {payload}")
+                            token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
+                            print(f"[LOG] Sending PUT request to ORDER_UPDATE_URL: {ORDER_UPDATE_URL}")
+                            response = requests.put(ORDER_UPDATE_URL, json={"token": token}, timeout=10) # Added timeout
+                            response.raise_for_status()
+                            print(f"[LOG] Order update request successful: {response.status_code}")
+                        except jwt.JWTError as jwt_err:
+                            print(f"[ERROR] JWT encoding failed for order update: {jwt_err}")
+                            # Decide if this should block email or just log
+                        except RequestException as put_error:
+                            print(f"[ERROR] Failed to send PUT request to order update URL.")
+                            print(f"[ERROR] Details: {put_error}")
+                            # Log error, but proceed to email attempt
+                            # Consider adding retry logic or background task for order update failures
+                        except Exception as order_update_err:
+                            print(f"[ERROR] Unexpected error during order update: {order_update_err}")
+                            print(traceback.format_exc())
 
                 else:
                     print(f"[WARN] No payment record found for MerchantTransactionId: {merchant_transaction_id}. Cannot process webhook.")

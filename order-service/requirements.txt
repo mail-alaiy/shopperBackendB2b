@@ -10,3 +10,4 @@ requests
 dnspython  # Required by MongoDB Atlas with SRV URI
 certifi
 mangum
+resend
