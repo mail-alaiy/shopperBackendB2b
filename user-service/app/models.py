@@ -60,7 +60,7 @@ class VerificationToken(Base):
 
     user = relationship("User", back_populates="verification_tokens")
 
-    def __init__(self, user_id: uuid.UUID, expiry_minutes: int = 60):
+    def __init__(self, user_id: uuid.UUID, expiry_minutes: int = 1440):
         self.token = secrets.token_urlsafe(32)
         self.user_id = user_id
         self.expires_at = datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
