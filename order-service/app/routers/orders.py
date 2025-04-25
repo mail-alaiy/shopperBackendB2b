@@ -81,6 +81,12 @@ async def create_order(
         if not cart_items:
             raise HTTPException(status_code=400, detail="Cart is empty")
         
+        user_response = requests.get(f"{USER_URL}/me", headers=headers)
+        if user_response.status_code != 200:
+            raise HTTPException(status_code=user_response.status_code, detail="Failed to fetch cart")
+        
+        user_json = user_response.json()
+        user_gst_number = user_json.get("gst_number", "")
         product_ids = list(cart_items.keys())
 
         # Step 2: Fetch product details
@@ -110,6 +116,7 @@ async def create_order(
                 continue
 
             sku_value = prod.get("skus", [])
+            gst_percentage = prod.get("gst", "0")
             sku_retrieved = str(sku_value[0]) if isinstance(sku_value, list) and sku_value else ""
 
             # 🛠️ FIX: Properly handle cart_items[prod_id] as a list
@@ -136,7 +143,17 @@ async def create_order(
                             if min_qty <= quantity <= max_qty:
                                 price_to_use = price
                                 break
-
+            flag_gst = False
+            cgst = 0
+            sgst = 0
+            igst = 0
+            total_gst = price_to_use/(float(gst_percentage)+1)
+            
+            if user_gst_number.startswith("06"):
+                cgst = total_gst/2
+                sgst = total_gst/2
+            else:
+                igst = total_gst
             total_price += quantity * price_to_use
             order_details = OrderDetails(
                 sku=sku_retrieved,
@@ -145,7 +162,10 @@ async def create_order(
                 quantityShipped=quantity,
                 consumerPrice=price_to_use,
                 title=prod.get("name", ""),
-                source=source
+                source=source,
+                cgst = cgst,
+                sgst = sgst,
+                igst = igst
             )
             order_details_list.append(order_details)
 

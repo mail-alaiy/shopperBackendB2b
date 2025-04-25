@@ -1,5 +1,5 @@
 # models.py
-from mongoengine import Document, StringField, EmailField, IntField, DateTimeField, EmbeddedDocument, ListField, ObjectIdField, EmbeddedDocumentField
+from mongoengine import Document, StringField, EmailField, IntField, DateTimeField, EmbeddedDocument, ListField, ObjectIdField, EmbeddedDocumentField, FloatField
 from datetime import datetime
 
 class OrderDetails(EmbeddedDocument):
@@ -7,7 +7,11 @@ class OrderDetails(EmbeddedDocument):
     sellerSku = StringField(required=False, default=None)
     quantity = IntField(min_value=1, required=True)
     quantityShipped = IntField(min_value=1, required=False, default=1)
-    consumerPrice = IntField(min_value=0, required=False, default=0)
+    consumerPrice = FloatField(min_value=0, required=False, default=0)
+    igst = FloatField(min_value=0, required=False, default = 0)
+    cgst = FloatField(min_value=0, required=False, default = 0)
+    sgst = FloatField(min_value=0, required=False, default = 0)
+    consumerPrice_before_taxes = FloatField(min_value=0, required=False, default = 0)
     title = StringField(required=True, max_length = 500)
     source = StringField(required=True, max_length=100)
     
@@ -30,6 +34,10 @@ class Order(Document):
     shippingAddress2 = StringField(required=False, max_length=70, default=None)
     shippingAddress3 = StringField(required=False, max_length=70, default=None)
     pStatus = StringField(required=True, max_length=5)
+    oStatus = StringField(required=False, max_length = 5, default="OB")
+    sStatus = StringField(required = False, max_length=5, default="SU")
+    dStatus = StringField(required = False, max_length=5, default="DN")
+    rStatus = StringField(required = False, max_length=5, default="RN")
     paidDate = DateTimeField(required=False, default=None)
     shipDate = DateTimeField(required=False, default=None)
     shippingMethod = StringField(required=False, default=None, max_length=30)
