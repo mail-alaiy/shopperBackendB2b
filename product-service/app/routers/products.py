@@ -16,25 +16,50 @@ INDEX_NAME = "product_index"
 router = APIRouter(prefix="/products")
 
 @router.get("")
-def get_products(query: str = Query(""),limit: int = Query(10), page: int = Query(1)):
+def get_products(
+        query: str = Query(""),
+        limit: int = Query(10),
+         page: int = Query(1, ge=0),
+         min_price: int = Query(None, ge=0),
+         max_price: int = Query(None, ge=0)
+    ):
+
     url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{INDEX_NAME}/query"
     headers = {
         "X-Algolia-API-Key": ALGOLIA_API_KEY,
         "X-Algolia-Application-Id": ALGOLIA_APP_ID,
         "Content-Type": "application/json"
     }
-    search_query = f"optionalWords:{query}" if query else ""
-    
-    payload = {
-        "params": f"query={query}&hitsPerPage={limit}&page={page}&optionalWords={query}"
-    }
+
+    filters = []
+    if min_price is not None:
+        filters.append(f"price >= {min_price}")
+    if max_price is not None:
+        filters.append(f"price <= {max_price}")
+
+    filters_str = " AND ".join(filters) if filters else ""
+
+    query_params = [
+        f"hitsPerPage={limit}",
+        f"page={page}"
+    ]
+    if query:
+        query_params.append(f"query={query}")
+    if filters_str:
+        query_params.append(f"filters={filters_str}")
+
+    params_str = "&".join(query_params)
+    payload = {"params": params_str}
     
     response = requests.post(url, headers=headers, json=payload)
     data = response.json()
     
     hits = data.get('hits', [])
     
-    return {"message": "Products retreived succesfully", "payload": hits}
+    return {"message": "Products retrieved successfully", "payload": hits}
+
+
+
 
 @router.get("/product/{product_id}")
 def get_product(product_id: str):
@@ -135,3 +160,5 @@ def get_multiple_products(request: ProductIdsRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
