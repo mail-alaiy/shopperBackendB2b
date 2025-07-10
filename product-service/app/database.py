@@ -15,3 +15,5 @@ print("Constructed Mongo URI:", mongo_url)
 mongo_client = MongoClient(mongo_url, tlsCAFile=certifi.where())
 
 db = mongo_client[database]
+
+demo_db=mongo_client["DEMO_PRODUCTS"]

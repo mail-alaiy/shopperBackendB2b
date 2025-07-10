@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Query, Path, Response
 import os
 from dotenv import load_dotenv
-from app.database import db
+from app.database import db, demo_db
 import requests
 import json
 from bson import ObjectId, json_util
 from pydantic import BaseModel
 from typing import List
+import csv
+import io
 
 load_dotenv()
 ALGOLIA_APP_ID = os.getenv("ALGOLIA_ID")
@@ -162,3 +164,215 @@ def get_multiple_products(request: ProductIdsRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/amazon/categories")
+def get_unique_amazon_categories():
+    try:
+        collection = demo_db["products_trial_categories"]
+
+        categories = collection.distinct("amazon_cat")
+
+        return {
+            "message": "Unique Amazon categories retrieved successfully",
+            "payload": categories
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get("/amazon/products-by-category")
+def get_amazon_products_by_category(
+        category: str = Query(...),
+        skip: int = 0,
+        limit: int = 20
+):
+    try:
+        collection = demo_db["products_trial_categories"]
+        total_count = collection.count_documents({"amazon_cat": category})
+
+        products_cursor = collection.find(
+            {
+                "amazon_cat": category
+            }
+        ).skip(skip).limit(limit)
+
+        products = json.loads(json_util.dumps(list(products_cursor)))
+
+        return {
+            "message": f"Amazon products retrieved successfully for category: {category}",
+            "payload": products,
+            "total_count": total_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+@router.get("/fulfillmen-matches")
+def get_fulfillmen_matches_by_asin(asin: str = Query(...)):
+    try:
+        collection = demo_db["products_trial_categories"]
+
+        amazon_product = collection.find_one({
+            "amazon_asin": asin,
+        })
+
+        if not amazon_product:
+            raise HTTPException(status_code=404, detail="Amazon product not found")
+
+        parent_product = amazon_product.get("parent_product")
+
+        if not parent_product:
+            raise HTTPException(status_code=404, detail="Parent product not found for this ASIN")
+
+        fulfillmen_cursor = collection.find({
+            "parent_product": parent_product,
+            "is_amazon_product": {"$ne": "1"}
+        })
+
+        fulfillmen_products = json.loads(json_util.dumps(list(fulfillmen_cursor)))
+
+        return {
+            "message": f"Fulfillmen matches retrieved successfully for ASIN: {asin}",
+            "payload": fulfillmen_products
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+@router.get("/fulfillmen-product-details")
+def get_fulfillmen_product_details(_id: str = Query(...)):
+    try:
+        collection = demo_db["products_trial_categories"]
+
+        object_id = ObjectId(_id)
+
+        product = collection.find_one({
+            "_id": object_id,
+        })
+
+        if not product:
+            raise HTTPException(status_code=404, detail="Fulfillmen product not found")
+
+        product_json = json.loads(json_util.dumps(product))
+
+        return {
+            "message": "Fulfillmen product details retrieved successfully",
+            "payload": product_json
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+@router.get("/fulfillmen/matches/download-csv")
+def download_fulfillmen_matches_csv(asin: str = Query(...)):
+
+    try:
+        collection = demo_db["products_trial_categories"]
+
+        products_cursor = collection.find({"amazon_asin": asin})
+        products = list(products_cursor)
+
+        if not products:
+            raise HTTPException(status_code=404, detail="No products found for this ASIN")
+
+        # Prepare CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Defining CSV header with fields
+        header = [
+            "ASIN",
+            "Title",
+            "Amazon Product Price",
+            "Amazon Product URL",
+            "Amazon Product Image URL",
+            "SKU",
+            "Parent Product",
+            "is_amazon_product",
+        ]
+        writer.writerow(header)
+
+        # Write product rows
+        for product in products:
+            skus = product.get("skus", "")
+            if isinstance(skus, list):
+                skus = ",".join([str(sku) for sku in skus])
+            row = [
+                product.get("amazon_asin", ""),
+                product.get("name", ""),
+                product.get("amazon_product_price", ""),
+                product.get("amazon_product_url", ""),
+                product.get("amazon_product_image_url", ""),
+                skus,
+                product.get("parent_product", ""),
+                product.get("is_amazon_product", ""),
+            ]
+            writer.writerow(row)
+
+        output.seek(0)
+        csv_content = output.getvalue()
+
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=fulfillmen_matches_{asin}.csv"
+            },
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+@router.get("/amazon/product-details")
+def get_amazon_product_details(asin: str = Query(...)):
+    try:
+        collection = demo_db["products_trial_categories"]
+
+        product = collection.find_one({"amazon_asin": asin})
+
+        if not product:
+            raise HTTPException(status_code=404, detail="Amazon product not found")
+
+        product["_id"] = str(product["_id"])
+
+        return {"message": "Amazon product details retrieved successfully", "payload": product}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get("/amazon/{product_id}")
+def get_product_by_id(product_id: str):
+    try:
+        collection = demo_db["products_trial_categories"]
+
+        # Validate ObjectId
+        if not ObjectId.is_valid(product_id):
+            raise HTTPException(status_code=400, detail="Invalid product ID")
+
+        product = collection.find_one({"_id": ObjectId(product_id)})
+
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        product_json = json.loads(json_util.dumps(product))
+
+        return {
+            "message": "Product retrieved successfully",
+            "payload": product_json
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
