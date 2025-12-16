@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-mongoengine
-python-jose[cryptography]
-requests
-python-dotenv
-pydantic
-resend
-mangum

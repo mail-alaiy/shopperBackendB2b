@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import products
-from app.routers import categories
-from app.routers import health_check
+from routers import products
+from routers import categories
+from routers import health_check
 from mangum import Mangum
 app = FastAPI(title="Product Service")
 
