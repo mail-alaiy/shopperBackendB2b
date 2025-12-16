@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pymongo
+python-dotenv
+bcrypt
+python-jose
+mongoengine
+pydantic
+requests
+dnspython  # Required by MongoDB Atlas with SRV URI
+certifi
+mangum
+resend

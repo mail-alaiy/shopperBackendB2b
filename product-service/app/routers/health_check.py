@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Query, Path
 import os
 from dotenv import load_dotenv
-from database import db
+from app.database import db
 import requests
 import json
 from bson import ObjectId, json_util
